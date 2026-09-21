@@ -1,0 +1,17 @@
+# Your own data — never commit these.
+config.json
+dictionary.json
+snippets.json
+history.jsonl
+scratchpad.md
+.localflow.lock
+.menubar/
+
+# Build artefacts
+.venv/
+build/
+dist/
+*.icns
+__pycache__/
+*.pyc
+.DS_Store

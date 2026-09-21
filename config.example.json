@@ -1,0 +1,131 @@
+{
+  "trigger": {
+    "mode": "hold",
+    "key": "mouse_middle",
+    "toggle_combo": [
+      "cmd",
+      "shift",
+      "space"
+    ],
+    "keep_fn": true,
+    "double_click_seconds": 0.35,
+    "pass_through_clicks": true,
+    "hold_min_seconds": 0.35,
+    "double_tap_seconds": 0.35
+  },
+  "whisper": {
+    "model": "mlx-community/whisper-large-v3-turbo",
+    "language": "en",
+    "language_mode": "en",
+    "romanize": true
+  },
+  "cleanup": {
+    "enabled": true,
+    "model": "llama3.2:3b",
+    "ollama_url": "http://localhost:11434",
+    "level": "standard",
+    "style": "default"
+  },
+  "audio": {
+    "input_device": null,
+    "samplerate": 16000,
+    "channels": 1,
+    "max_seconds": 300,
+    "preferred_devices": [],
+    "duck_other_audio": true
+  },
+  "paste": {
+    "auto_paste": true,
+    "restore_clipboard": true
+  },
+  "play_sounds": true,
+  "context": {
+    "enabled": true,
+    "history_chars": 1200,
+    "vocabulary": [],
+    "read_screen": true,
+    "screen_chars": 300
+  },
+  "sound_volume": 0.3,
+  "command": {
+    "model": "llama3.2:3b",
+    "timeout": 60
+  },
+  "shortcuts": {
+    "paste_last": "<cmd>+<alt>+v",
+    "copy_last": "<cmd>+<alt>+c",
+    "command_mode": "<cmd>+<alt>+j",
+    "scratchpad": "<cmd>+<alt>+s"
+  },
+  "voices": {
+    "work": {
+      "apps": [
+        "Slack",
+        "Microsoft Teams",
+        "Discord",
+        "Telegram",
+        "Linear",
+        "Notion"
+      ],
+      "level": "light",
+      "style": "formal",
+      "press_enter": false
+    },
+    "email": {
+      "apps": [
+        "Mail",
+        "Superhuman",
+        "Microsoft Outlook",
+        "Spark"
+      ],
+      "level": "standard",
+      "style": "formal",
+      "press_enter": false
+    },
+    "messages": {
+      "apps": [
+        "Messages",
+        "WhatsApp",
+        "Messenger",
+        "WeChat"
+      ],
+      "level": "light",
+      "style": "casual",
+      "press_enter": false
+    },
+    "code": {
+      "apps": [
+        "Terminal",
+        "iTerm",
+        "Visual Studio Code",
+        "Cursor",
+        "Windsurf",
+        "Xcode",
+        "Claude",
+        "ChatGPT",
+        "Warp",
+        "Ghostty"
+      ],
+      "level": "light",
+      "style": "code",
+      "press_enter": false
+    },
+    "other": {
+      "apps": [],
+      "level": "light",
+      "style": "default",
+      "press_enter": false
+    }
+  },
+  "ui": {
+    "open_hub_on_launch": true,
+    "flow_bar": true,
+    "flow_bar_always": false
+  },
+  "sound_volumes": {
+    "start": 0.35,
+    "stop": 0.2,
+    "done": 0.05
+  },
+  "transcribe_timeout": 180
+}

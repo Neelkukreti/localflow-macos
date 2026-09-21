@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LocalFlow</title>
+<style>
+:root{
+  --bg:#f7f6f3; --panel:#ffffff; --panel-2:#fdfcfa; --raise:#f0eeea;
+  --line:#e6e2da; --line-soft:#efece6;
+  --ink:#1b1c22; --text:#3a3c46; --muted:#7c8091; --faint:#a4a8b6;
+  --accent:#4a55d4; --accent-soft:#eef0fe; --warm:#b5761a; --ok:#2f8f63; --bad:#c9453f;
+  --display:"Superclarendon","Iowan Old Style",Georgia,serif;
+  --body:"Seravek","Avenir Next","Helvetica Neue",sans-serif;
+  --mono:"SF Mono","Menlo",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--body);
+  font-size:13.5px; line-height:1.55; display:flex; overflow:hidden;
+  -webkit-font-smoothing:antialiased; cursor:default; user-select:none;
+}
+/* grain + a cold light from the top-left, so the panels feel lit not flat */
+body::before{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(760px 420px at 6% -12%, rgba(74,85,212,.055), transparent 62%),
+    radial-gradient(520px 340px at 102% 108%, rgba(181,118,26,.04), transparent 60%);
+}
+/* ---------------- rail ---------------- */
+.rail{
+  width:178px; flex:0 0 178px; background:#f2f0ec;
+  border-right:1px solid var(--line-soft); padding:16px 12px; z-index:1;
+  display:flex; flex-direction:column; gap:3px;
+}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px 16px}
+.brand svg{width:22px;height:22px;flex:0 0 22px}
+.brand h1{font-family:var(--display);font-size:16px;font-weight:600;color:var(--ink);letter-spacing:.2px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{
+  all:unset; display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:7px;
+  color:var(--muted); font-family:var(--body); font-size:13px; cursor:pointer;
+  transition:background .14s ease,color .14s ease; position:relative;
+}
+.nav button:hover{background:rgba(0,0,0,.04);color:var(--text)}
+.nav button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.nav button.on::before{
+  content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);
+  width:2px;height:15px;background:var(--accent);border-radius:0 2px 2px 0;
+}
+.nav .dot{width:5px;height:5px;border-radius:50%;background:var(--bad);margin-left:auto;display:none}
+.nav button.alert .dot{display:block}
+.rail footer{margin-top:auto;padding:8px;color:var(--faint);font-family:var(--mono);font-size:10.5px;letter-spacing:.3px}
+/* ---------------- main ---------------- */
+main{flex:1;overflow-y:auto;padding:26px 30px 40px;z-index:1}
+main::-webkit-scrollbar{width:9px}
+main::-webkit-scrollbar-thumb{background:#d8d4cb;border-radius:9px;border:3px solid var(--bg)}
+.head{margin-bottom:20px}
+.head h2{font-family:var(--display);font-size:24px;font-weight:600;color:var(--ink);letter-spacing:-.2px}
+.head p{color:var(--muted);font-size:12.5px;margin-top:2px}
+.view{display:none;animation:rise .38s cubic-bezier(.2,.7,.3,1) both}
+.view.on{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.card{
+  background:var(--panel);
+  border:1px solid var(--line); border-radius:11px; padding:15px 16px; margin-bottom:12px;
+  box-shadow:0 1px 2px rgba(20,20,30,.04);
+}
+.card h3{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--faint);font-weight:600;margin-bottom:11px;font-family:var(--mono)}
+.row{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.row:last-child{border-bottom:none;padding-bottom:0}
+.row:first-of-type{padding-top:0}
+.row .grow{flex:1;min-width:0}
+.row .t{color:var(--ink);font-size:13px}
+.row .s{color:var(--muted);font-size:11.5px;margin-top:1px}
+.pill{
+  font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 8px;border-radius:20px;border:1px solid;white-space:nowrap;
+}
+.pill.ok{color:var(--ok);border-color:rgba(47,143,99,.28);background:rgba(47,143,99,.07)}
+.pill.bad{color:var(--bad);border-color:rgba(201,69,63,.28);background:rgba(201,69,63,.06)}
+.pill.warn{color:var(--warm);border-color:rgba(181,118,26,.28);background:rgba(181,118,26,.07)}
+button.act{
+  all:unset;font-family:var(--body);font-size:12px;color:var(--ink);cursor:pointer;
+  padding:5px 11px;border-radius:7px;background:#fff;border:1px solid var(--line);
+  transition:background .14s,border-color .14s,transform .1s;white-space:nowrap;
+}
+button.act:hover{background:var(--accent-soft);border-color:#c3c8f4}
+button.act:active{transform:translateY(1px)}
+button.act.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.act.primary:hover{background:#3c46bd}
+button.act.ghost{background:transparent;color:var(--muted)}
+button.act.ghost:hover{color:var(--bad);border-color:rgba(201,69,63,.3);background:rgba(201,69,63,.05)}
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:13px 14px;box-shadow:0 1px 2px rgba(20,20,30,.04)}
+.stat b{display:block;font-family:var(--display);font-size:25px;color:var(--ink);font-weight:600;line-height:1.1}
+.stat span{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)}
+/* lists */
+.item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.item:last-child{border-bottom:none}
+.item .txt{flex:1;min-width:0;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .meta{font-family:var(--mono);font-size:10.5px;color:var(--faint);white-space:nowrap}
+.empty{color:var(--faint);font-size:12.5px;font-style:italic;padding:6px 0}
+.tog{
+  all:unset;width:30px;height:17px;border-radius:20px;background:#d9d5cc;position:relative;
+  cursor:pointer;flex:0 0 30px;transition:background .18s;
+}
+.tog::after{content:"";position:absolute;top:2.5px;left:2.5px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .18s,background .18s}
+.tog.on{background:var(--accent)}
+.tog.on::after{transform:translateX(13px);background:#fff}
+/* inputs */
+input[type=text],select{
+  all:unset;font-family:var(--body);font-size:12.5px;color:var(--ink);background:#fff;
+  border:1px solid var(--line);border-radius:7px;padding:6px 9px;flex:1;min-width:0;user-select:text;
+}
+input[type=text]:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+input[type=range]{-webkit-appearance:none;background:transparent;flex:1;height:18px}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:#ddd9d0;border-radius:3px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);margin-top:-5px;box-shadow:0 0 0 3px var(--accent-soft)}
+select{cursor:pointer;flex:0 0 auto;min-width:150px}
+kbd{
+  font-family:var(--mono);font-size:10.5px;color:var(--ink);background:#fff;
+  border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 6px;
+}
+.hint{color:var(--faint);font-size:11.5px;margin-top:9px;line-height:1.5}
+.toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--ink);border:1px solid var(--ink);color:#fff;
+  padding:8px 15px;border-radius:9px;font-size:12.5px;opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s;z-index:9;box-shadow:0 10px 30px -10px #000;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<nav class="rail">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2.5" width="6" height="11" rx="3" fill="#1b1c22"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" stroke="#4a55d4" stroke-width="1.8" stroke-linecap="round"/><path d="M12 18v3.2M8.4 21.2h7.2" stroke="#1b1c22" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <h1>LocalFlow</h1>
+  </div>
+  <div class="nav">
+    <button data-v="status" class="on">Status<i class="dot"></i></button>
+    <button data-v="history">History</button>
+    <button data-v="dictionary">Dictionary</button>
+    <button data-v="snippets">Snippets</button>
+    <button data-v="settings">Settings</button>
+  </div>
+  <footer>100% ON-DEVICE</footer>
+</nav>
+
+<main>
+  <section class="view on" id="v-status">
+    <div class="head"><h2>Status</h2><p>What's working, and what macOS is still holding back.</p></div>
+    <div class="stats" id="stats"></div>
+    <div class="card"><h3>Permissions</h3><div id="perms"></div></div>
+    <div class="card"><h3>Engine</h3><div id="engine"></div></div>
+  </section>
+
+  <section class="view" id="v-history">
+    <div class="head"><h2>History</h2><p>Every dictation, kept on this Mac. Click one to copy it.</p></div>
+    <div class="card"><h3>Recent</h3><div id="history"></div></div>
+    <div class="card"><div class="row"><div class="grow"><div class="t">Forget past dictations</div><div class="s">Clears the context history Whisper learns your phrasing from.</div></div><button class="act ghost" id="clear-history">Clear</button></div></div>
+  </section>
+
+  <section class="view" id="v-dictionary">
+    <div class="head"><h2>Dictionary</h2><p>Names and jargon spelled your way, fed to Whisper as its prompt.</p></div>
+    <div class="card"><h3>Add</h3><div class="row"><input type="text" id="word-in" placeholder="Kubernetes, Anthropic, PostgreSQL"><button class="act primary" id="word-add">Add</button></div></div>
+    <div class="card"><h3>Known words</h3><div id="dict"></div></div>
+  </section>
+
+  <section class="view" id="v-snippets">
+    <div class="head"><h2>Snippets</h2><p>A phrase you say that expands into text you'd rather not say.</p></div>
+    <div class="card"><h3>Add</h3>
+      <div class="row"><input type="text" id="snip-trig" placeholder="my booking link"><input type="text" id="snip-text" placeholder="https://cal.com/you"><button class="act primary" id="snip-add">Save</button></div>
+      <div class="hint">Expansion runs after cleanup, so the model never sees the payload and can't rewrite it.</div>
+    </div>
+    <div class="card"><h3>Saved</h3><div id="snips"></div></div>
+  </section>
+
+  <section class="view" id="v-settings">
+    <div class="head"><h2>Settings</h2><p>Everything here writes straight to config.json.</p></div>
+    <div class="card"><h3>Sound</h3>
+      <div id="cues"></div>
+      <div class="row"><div class="grow"><div class="t">Play sounds</div><div class="s">Turn every cue off at once.</div></div>
+        <button class="tog" id="snd-on"></button></div>
+    </div>
+    <div class="card"><h3>Transcription</h3>
+      <div class="row"><div class="grow"><div class="t">Language</div><div class="s">Hinglish writes Roman script, not Devanagari.</div></div>
+        <select id="lang"><option value="en">English</option><option value="hi">Hindi (Roman script)</option><option value="hinglish">Hinglish</option><option value="auto">Auto-detect</option></select></div>
+      <div class="row"><div class="grow"><div class="t">Cleanup level</div><div class="s">Per-app voices override this.</div></div>
+        <select id="level"><option value="off">Off — paste raw</option><option value="light">Light</option><option value="standard">Standard</option><option value="aggressive">Aggressive</option></select></div>
+      <div class="row"><div class="grow"><div class="t">Microphone</div><div class="s" id="mic-s"></div></div><select id="mic"></select></div>
+    </div>
+    <div class="card"><h3>Behaviour</h3><div id="toggles"></div></div>
+    <div class="card"><h3>Shortcuts</h3><div id="keys"></div></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const pend={}; let seq=0;
+function call(action,payload={}){return new Promise(r=>{const id=++seq;pend[id]=r;
+  window.webkit.messageHandlers.lf.postMessage({id,action,payload});});}
+window.lfResolve=(id,data)=>{const r=pend[id];if(r){delete pend[id];r(data);}};
+const $=s=>document.querySelector(s), esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let toastT; function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1900);}
+
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); $('#v-'+b.dataset.v).classList.add('on'); load(b.dataset.v);
+});
+
+async function loadStatus(){
+  const d=await call('status');
+  $('#stats').innerHTML=[['words',d.words],['dictations',d.count],['words saved typing',d.wpm_minutes+'m']]
+    .map(([l,v])=>`<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
+  $('#perms').innerHTML=d.perms.map(p=>`<div class="row"><div class="grow"><div class="t">${esc(p.label)}</div><div class="s">${esc(p.why)}</div></div>
+    <span class="pill ${p.ok?'ok':'bad'}">${p.ok?'granted':'missing'}</span>
+    ${p.ok?'':`<button class="act primary" data-pane="${esc(p.key)}">Open</button>`}</div>`).join('');
+  $('#perms').querySelectorAll('[data-pane]').forEach(b=>b.onclick=()=>{call('open_pane',{which:b.dataset.pane});toast('Opened System Settings — then relaunch LocalFlow');});
+  const bad=d.perms.some(p=>!p.ok);
+  document.querySelector('.nav button[data-v=status]').classList.toggle('alert',bad);
+  $('#engine').innerHTML=`
+    <div class="row"><div class="grow"><div class="t">Ollama</div><div class="s">${esc(d.model)} — cleanup and Command Mode</div></div><span class="pill ${d.ollama?'ok':'warn'}">${d.ollama?'running':'rule-based fallback'}</span></div>
+    <div class="row"><div class="grow"><div class="t">Whisper</div><div class="s">${esc(d.whisper)}</div></div><span class="pill ok">local</span></div>
+    <div class="row"><div class="grow"><div class="t">Microphone in use</div><div class="s">${esc(d.mic_note)}</div></div><span class="pill ${d.mic_ok?'ok':'warn'}">${esc(d.mic)}</span></div>
+    <div class="row"><div class="grow"><div class="t">Memory</div><div class="s">Peak for this process — the Whisper weights dominate it.</div></div><span class="pill ${d.memory>6000?'warn':'ok'}">${esc(d.memory)} MB</span></div>`;
+}
+async function loadHistory(){
+  const d=await call('history');
+  $('#history').innerHTML=d.items.length?d.items.map((h,i)=>
+    `<div class="item" data-i="${i}" style="cursor:pointer"><div class="txt">${esc(h.text)}</div><div class="meta">${esc(h.app||'—')} · ${esc(h.when)}</div></div>`).join('')
+    :'<div class="empty">Nothing yet — hold Fn and say something.</div>';
+  $('#history').querySelectorAll('.item').forEach(el=>el.onclick=async()=>{await call('copy',{index:+el.dataset.i});toast('Copied');});
+}
+async function loadDictionary(){
+  const d=await call('dictionary');
+  $('#dict').innerHTML=d.items.length?d.items.map(w=>
+    `<div class="item"><button class="tog ${w.on?'on':''}" data-k="${esc(w.key)}"></button><div class="txt">${esc(w.display)}</div><div class="meta">${w.count||0}×</div></div>`).join('')
+    :'<div class="empty">Nothing yet — it learns words you say three times.</div>';
+  $('#dict').querySelectorAll('.tog').forEach(t=>t.onclick=async()=>{await call('toggle_word',{key:t.dataset.k});loadDictionary();});
+}
+async function loadSnippets(){
+  const d=await call('snippets');
+  $('#snips').innerHTML=d.items.length?d.items.map(s=>
+    `<div class="item"><button class="tog ${s.on?'on':''}" data-k="${esc(s.key)}"></button>
+      <div class="txt"><b style="color:var(--ink)">${esc(s.trigger)}</b> → ${esc(s.text)}</div>
+      <button class="act ghost" data-del="${esc(s.key)}">Delete</button></div>`).join('')
+    :'<div class="empty">No snippets yet.</div>';
+  $('#snips').querySelectorAll('.tog').forEach(t=>t.onclick=async()=>{await call('toggle_snippet',{key:t.dataset.k});loadSnippets();});
+  $('#snips').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{await call('delete_snippet',{key:b.dataset.del});loadSnippets();toast('Deleted');});
+}
+async function loadSettings(){
+  const d=await call('settings');
+  $('#cues').innerHTML=d.cues.map(c=>`<div class="row"><div class="grow"><div class="t">${esc(c.label)}</div><div class="s">${esc(c.note)}</div></div>
+    <input type="range" min="0" max="1" step="0.05" data-cue="${esc(c.key)}" value="${c.value}" style="max-width:140px">
+    <span style="font-family:var(--mono);color:var(--muted);width:28px;text-align:right;font-size:11px" id="n-${esc(c.key)}">${Math.round(c.value*100)}</span>
+    <button class="act" data-test="${esc(c.key)}">Test</button></div>`).join('');
+  $('#cues').querySelectorAll('input[type=range]').forEach(r=>{
+    r.oninput=()=>{$('#n-'+r.dataset.cue).textContent=Math.round(r.value*100);};
+    r.onchange=()=>{call('set',{key:'cue_volume',cue:r.dataset.cue,value:+r.value});};
+  });
+  $('#cues').querySelectorAll('[data-test]').forEach(b=>b.onclick=()=>{
+    const r=$('#cues input[data-cue="'+b.dataset.test+'"]');
+    call('test_sound',{cue:b.dataset.test,value:+r.value});});
+  $('#snd-on').classList.toggle('on',d.play_sounds);
+  $('#snd-on').onclick=()=>{const on=!$('#snd-on').classList.contains('on');
+    $('#snd-on').classList.toggle('on',on);call('set',{key:'play_sounds',value:on});};
+  $('#lang').value=d.language; $('#level').value=d.level;
+  $('#mic').innerHTML=`<option value="">System default</option>`+d.mics.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')
+    +(d.mic_missing?`<option value="${esc(d.mic_missing)}">${esc(d.mic_missing)} (unplugged)</option>`:'');
+  $('#mic').value=d.mic||''; $('#mic-s').textContent=d.mic_note;
+  $('#toggles').innerHTML=d.toggles.map(t=>`<div class="row"><div class="grow"><div class="t">${esc(t.label)}</div><div class="s">${esc(t.note)}</div></div>
+    <button class="tog ${t.on?'on':''}" data-tog="${esc(t.key)}"></button></div>`).join('');
+  $('#toggles').querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{
+    const on=!b.classList.contains('on'); b.classList.toggle('on',on);
+    call('set',{key:b.dataset.tog,value:on}); toast('Saved');});
+  $('#keys').innerHTML=d.keys.map(k=>`<div class="row"><div class="grow"><div class="t">${esc(k.label)}</div></div><kbd>${esc(k.combo)}</kbd></div>`).join('');
+}
+$('#lang').onchange=e=>{call('set',{key:'language_mode',value:e.target.value});toast('Saved');};
+$('#level').onchange=e=>{call('set',{key:'level',value:e.target.value});toast('Saved');};
+$('#mic').onchange=e=>{call('set',{key:'mic',value:e.target.value});toast('Saved');loadSettings();};
+$('#word-add').onclick=async()=>{const v=$('#word-in').value.trim();if(!v)return;await call('add_words',{text:v});$('#word-in').value='';loadDictionary();toast('Added');};
+$('#snip-add').onclick=async()=>{const t=$('#snip-trig').value.trim(),x=$('#snip-text').value.trim();if(!t||!x)return;
+  await call('add_snippet',{trigger:t,text:x});$('#snip-trig').value='';$('#snip-text').value='';loadSnippets();toast('Saved');};
+$('#clear-history').onclick=async()=>{await call('clear_history');loadHistory();loadStatus();toast('Cleared');};
+
+const loaders={status:loadStatus,history:loadHistory,dictionary:loadDictionary,snippets:loadSnippets,settings:loadSettings};
+function load(v){loaders[v]&&loaders[v]();}
+load('status');
+window.lfRefresh=()=>{const v=document.querySelector('.nav button.on').dataset.v;load(v);};
+</script>
+</body>
+</html>
