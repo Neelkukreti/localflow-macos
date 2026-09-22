@@ -13,7 +13,8 @@
     "hold_min_seconds": 0.35,
     "double_tap_seconds": 0.35,
     "wheel": true,
-    "hold_key": "fn"
+    "hold_key": "fn",
+    "debug_log": false
   },
   "whisper": {
     "model": "mlx-community/whisper-large-v3-turbo",

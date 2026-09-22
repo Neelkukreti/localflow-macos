@@ -32,8 +32,19 @@ def build(active=True):
         on_start=lambda: log.append("start"), on_stop=lambda: log.append("stop"),
         is_active=lambda: active, replay=lambda: log.append("replay"),
         double_seconds=0.35, clock=Clock(), timer=FakeTimer,
+        hold_seconds=0.35, drop=lambda: log.append("drop"),
     )
     return trig, log
+
+
+def fire(kind):
+    """Fire only the timer of one kind: 'pending' replays, 'hold' talks."""
+    delay_of = {"pending": 0.35, "hold": 0.35}
+    for t in list(FakeTimer.live):
+        if t.delay == delay_of[kind] and not t.cancelled:
+            FakeTimer.live.remove(t)
+            t.fn()
+            return
 
 
 fails = []
@@ -116,6 +127,41 @@ try:
     check("replay: nothing to replay twice", posted, [])
 finally:
     mouse_trigger.Quartz.CGEventPost = real_post
+
+# ---- push-to-talk: holding the wheel down dictates, like holding the key
+t, log = build()
+check("hold: press is deferred first", t.down(), DEFER)
+# the hold timer is the second of the two started on press
+for _timer in list(FakeTimer.live):
+    if not _timer.cancelled and _timer.fn.__name__ == "_fire_hold":
+        FakeTimer.live.remove(_timer); _timer.fn()
+check("hold: passing the threshold starts dictation", [x for x in log if x == "start"], ["start"])
+check("hold: the held-back press is dropped, not replayed", "drop" in log and "replay" not in log, True)
+check("hold: releasing finishes and is swallowed", t.up(), SWALLOW)
+check("hold: it transcribed", log[-1], "stop")
+check("hold: no longer listening", t.listening, False)
+
+# a quick click must still reach the app, not start a dictation
+t, log = build()
+check("quick click: deferred", t.down(), DEFER)
+check("quick click: release deferred", t.up(), DEFER)
+for _timer in list(FakeTimer.live):
+    if not _timer.cancelled and _timer.fn.__name__ == "_fire_hold":
+        FakeTimer.live.remove(_timer); _timer.fn()
+check("quick click: released before the threshold, so no dictation", log, [])
+FakeTimer.fire_all()
+check("quick click: replayed to the app", log, ["replay"])
+
+# a double-click still locks hands-free rather than push-to-talk
+t, log = build()
+t.down(); t.up()
+Clock.t = 0.1
+check("double-click still swallows the second press", t.down(), SWALLOW)
+check("double-click still starts hands-free", [x for x in log if x == "start"], ["start"])
+check("double-click: release does not stop it", t.up(), SWALLOW)
+check("double-click: still listening", t.listening, True)
+check("double-click: a later click stops it", t.down(), SWALLOW)
+check("double-click: that transcribed", log[-1], "stop")
 
 print("\n" + ("ALL PASS" if not fails else f"FAILURES: {fails}"))
 raise SystemExit(1 if fails else 0)

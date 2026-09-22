@@ -40,6 +40,7 @@ from scratchpad import Scratchpad
 from hub import Hub
 from flowbar import FlowBar
 from fn_key import FnListener
+import mouse_trigger
 from mouse_trigger import ClickTrigger, MiddleClickListener
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -370,6 +371,7 @@ class LocalFlowApp(rumps.App):
 
     def _start_click_listener(self):
         trig = self.cfg["trigger"]
+        mouse_trigger.set_logging(trig.get("debug_log", False))
 
         def build(replay):  # the listener owns replaying a click it held back
             self.click_trigger = ClickTrigger(
@@ -378,6 +380,7 @@ class LocalFlowApp(rumps.App):
                 is_active=lambda: not self.busy and not self.is_recording,
                 replay=replay,
                 double_seconds=trig.get("double_click_seconds", 0.35),
+                hold_seconds=trig.get("hold_min_seconds", 0.35),
             )
             return self.click_trigger
 

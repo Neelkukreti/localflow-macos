@@ -1,17 +1,44 @@
 """Middle-mouse (scroll-wheel click) trigger.
 
-Double-click the wheel to start listening; click once to finish. A plain single
-click still belongs to whatever app is underneath — middle-click must keep
-opening and closing Chrome tabs — so the tap swallows every middle click and
-replays a lone one to the system once the double-click window lapses. The clicks
+Three gestures, the same ones the hold key has:
+
+  press and hold      talk while held, transcribes on release
+  double-click        hands-free; one more click finishes
+  plain single click  not ours — replayed to the app underneath
+
+A plain single click has to keep belonging to whatever is under the cursor
+(middle-click still opens and closes browser tabs), so the tap swallows every
+middle click and replays a lone one once the double-click window lapses. Clicks
 that drive dictation are never replayed, so starting or stopping a dictation
 leaves no stray tab behind.
 """
 
+import os
 import threading
 import time
 
 import Quartz
+
+# Opt-in diagnostics. The trigger fails invisibly when it fails at all — the tap
+# either never gets created or quietly decides a click isn't ours — so there has
+# to be somewhere to look. Enabled by trigger.debug_log in config.json.
+LOG_PATH = os.path.expanduser("~/Library/Logs/LocalFlow-trigger.log")
+_log_enabled = False
+
+
+def set_logging(on):
+    global _log_enabled
+    _log_enabled = bool(on)
+
+
+def log(message):
+    if not _log_enabled:
+        return
+    try:
+        with open(LOG_PATH, "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+    except OSError:
+        pass
 
 MIDDLE_BUTTON = 2
 # Marks the clicks we post ourselves, so the tap ignores its own replays.
@@ -30,22 +57,29 @@ class ClickTrigger:
     """
 
     def __init__(self, on_start, on_stop, is_active, replay, double_seconds=0.35,
-                 clock=time.monotonic, timer=threading.Timer):
-        self.on_start = on_start      # start listening (hands-free)
+                 clock=time.monotonic, timer=threading.Timer, hold_seconds=0.35,
+                 drop=None):
+        self.on_start = on_start      # start listening
         self.on_stop = on_stop        # finish and transcribe
         self.is_active = is_active    # () -> False while a dictation is being processed
         self.replay = replay          # send a held-back single click on to the system
+        self.drop = drop or (lambda: None)  # forget a held-back click; it was ours
         self.double_seconds = double_seconds
+        self.hold_seconds = hold_seconds
         self._clock = clock
         self._timer = timer
         self.listening = False
         self._lock = threading.RLock()
         self._pending = None          # timer running while a first click is held back
+        self._hold = None             # timer that turns a long press into hold-to-talk
+        self._holding = False         # recording because the button is still down
+        self._down = False
         self._first_down_at = 0.0
         self._swallow_up = False      # the release of a click we acted on
 
     def down(self):
         with self._lock:
+            self._down = True
             if self.listening:  # a click while listening ends the dictation
                 self.listening = False
                 self._swallow_up = True
@@ -63,10 +97,22 @@ class ClickTrigger:
             self._pending = self._timer(self.double_seconds, self._fire_pending)
             self._pending.daemon = True
             self._pending.start()
+            # Held down past the threshold and it's push-to-talk, not a click.
+            self._hold = self._timer(self.hold_seconds, self._fire_hold)
+            self._hold.daemon = True
+            self._hold.start()
             return DEFER
 
     def up(self):
         with self._lock:
+            self._down = False
+            self._cancel_hold()
+            if self._holding:       # push-to-talk: releasing finishes the dictation
+                self._holding = False
+                self.listening = False
+                log("release -> transcribing")
+                self.on_stop()
+                return SWALLOW
             if self._swallow_up:
                 self._swallow_up = False
                 return SWALLOW
@@ -80,6 +126,26 @@ class ClickTrigger:
             if not self.listening:
                 self.replay()  # it was a plain middle click after all
 
+    def _fire_hold(self):
+        """The button is still down past hold_seconds: talk while it's held."""
+        with self._lock:
+            self._hold = None
+            if not self._down or self.listening or not self.is_active():
+                log(f"hold not taken (down={self._down}, listening={self.listening}, "
+                    f"active={self.is_active()})")
+                return
+            log("hold taken -> push-to-talk")
+            self._cancel_pending()
+            self.drop()          # the held-back press was ours, don't replay it
+            self._holding = True
+            self.listening = True
+            self.on_start()
+
+    def _cancel_hold(self):
+        if self._hold is not None:
+            self._hold.cancel()
+            self._hold = None
+
     def _cancel_pending(self):
         if self._pending is not None:
             self._pending.cancel()
@@ -89,7 +155,10 @@ class ClickTrigger:
         """Forget any in-flight click state (used when a dictation is cancelled)."""
         with self._lock:
             self._cancel_pending()
+            self._cancel_hold()
             self.listening = False
+            self._holding = False
+            self._down = False
             self._swallow_up = False
 
 
@@ -98,6 +167,9 @@ class MiddleClickListener(threading.Thread):
         super().__init__(daemon=True)
         self.pass_through = pass_through
         self.trigger = trigger_factory(self.replay)
+        # The grammar needs to discard a held-back press once it decides the
+        # press was push-to-talk rather than a click meant for another app.
+        self.trigger.drop = self._drop_held
         self._held = []
         self._held_lock = threading.Lock()
         self._replay_until = 0.0  # events echoed back to us right after a replay
@@ -133,6 +205,7 @@ class MiddleClickListener(threading.Thread):
 
     def _callback(self, _proxy, event_type, event, _refcon):
         if event_type in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
+            log("tap was disabled by macOS — re-enabling")
             Quartz.CGEventTapEnable(self._tap, True)
             return event
         try:
@@ -143,6 +216,8 @@ class MiddleClickListener(threading.Thread):
                 return event
             if event_type == Quartz.kCGEventOtherMouseDown:
                 verdict = self.trigger.down()
+                log(f"down -> {verdict} (active={self.trigger.is_active()}, "
+                    f"listening={self.trigger.listening})")
             elif event_type == Quartz.kCGEventOtherMouseUp:
                 verdict = self.trigger.up()
             else:
@@ -177,9 +252,11 @@ class MiddleClickListener(threading.Thread):
                 Quartz.kCGEventTapOptionListenOnly, mask, self._callback, None,
             )
         if self._tap is None:
+            log("TAP CREATION FAILED — no Accessibility/Input Monitoring")
             if getattr(self, "on_error", None):
                 self.on_error("mouse wheel")
             return
+        log(f"tap created (pass_through={self.pass_through})")
         source = Quartz.CFMachPortCreateRunLoopSource(None, self._tap, 0)
         Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetCurrent(), source, Quartz.kCFRunLoopCommonModes)
         Quartz.CGEventTapEnable(self._tap, True)

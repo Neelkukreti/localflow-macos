@@ -92,12 +92,17 @@ macOS will ask for three, all under System Settings → Privacy & Security:
 Without Input Monitoring the triggers silently do nothing — the Status tab in the app window
 tells you exactly which grant is missing and opens the right settings pane.
 
+If a trigger still misbehaves, set `trigger.debug_log` to `true` in `config.json` and relaunch:
+every middle click and the decision made about it is written to
+`~/Library/Logs/LocalFlow-trigger.log`.
+
 ## Using it
 
 | Gesture | What happens |
 |---|---|
 | **Hold the trigger key** | Records while held, transcribes on release |
 | **Double-tap it** | Hands-free — keeps listening until you tap again |
+| **Hold the mouse wheel** | Records while held, transcribes on release |
 | **Double-click the mouse wheel** | Hands-free; one click finishes |
 | **⌘⌥J** | Command Mode |
 | **⌘⌥S** | Scratchpad |
@@ -105,6 +110,9 @@ tells you exactly which grant is missing and opens the right settings pane.
 
 A lone middle click still reaches the app underneath (~0.35 s later), so middle-click keeps
 opening and closing browser tabs. Only the clicks that start and stop a dictation are swallowed.
+
+The wheel and the hold key share the same three gestures: hold to talk, double to lock, and a
+plain quick click is left alone for the app underneath.
 
 Both triggers are configurable in **Settings → Trigger**: pick the hold key (Fn, either Option,
 right Command, right Control, F13–F15, or none), turn the wheel trigger on or off, and tune the
