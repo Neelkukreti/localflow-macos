@@ -76,6 +76,51 @@ FILLERS = re.compile(
 )
 
 
+# ---- casing ------------------------------------------------------------
+# A 3B model is unreliable about capitalisation however firmly you ask, so we
+# fix it in code afterwards instead. Skipped for the `code` style, where
+# "friday" may well be a variable and "I" an index.
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july",
+           "august", "september", "october", "november", "december")
+_ALWAYS_CAPS = _WEEKDAYS + _MONTHS
+_CAPS_RE = re.compile(r"(?<!\w)(" + "|".join(_ALWAYS_CAPS) + r")(?!\w)", re.IGNORECASE)
+_I_RE = re.compile(r"(?<!\w)i(?=(?:'(?:m|ve|ll|d))?(?!\w))", re.IGNORECASE)
+# Start of the text, or after . ! ? … or a newline.
+_SENTENCE_RE = re.compile(r"(^|[.!?…]['\")\]]?\s+|\n\s*)([a-z][\w']*)")
+# Don't "fix" an abbreviation: e.g. / i.e. / vs. shouldn't start a sentence.
+_ABBREV = re.compile(r"\b(?:e\.g|i\.e|etc|vs|approx|no|fig|cf)\.\s+$", re.IGNORECASE)
+
+
+def fix_casing(text: str) -> str:
+    """Capitalise sentence starts, the pronoun I, weekdays and months.
+
+    Leaves words that already carry their own casing alone (BTC, camelCase,
+    OpenSearch), because those are usually deliberate.
+    """
+    if not text:
+        return text
+
+    def sentence(m):
+        lead, word = m.group(1), m.group(2)
+        if _ABBREV.search(text[:m.start(2)]):
+            return m.group(0)
+        # camelCase, iPhone, eBay: an internal capital means the casing is
+        # deliberate, so starting a sentence with it doesn't licence changing it.
+        if any(ch.isupper() for ch in word[1:]):
+            return m.group(0)
+        return lead + word[0].upper() + word[1:]
+
+    out = _SENTENCE_RE.sub(sentence, text)
+    out = _I_RE.sub("I", out)
+
+    def always(m):
+        word = m.group(1)
+        # already capitalised or shouted -> leave it
+        return word if word[:1].isupper() else word.capitalize()
+    return _CAPS_RE.sub(always, out)
+
+
 def rule_based(text: str) -> str:
     """Cheap, dependency-free tidy used as a fallback."""
     t = re.sub(r"\s*\bnew paragraph\b\s*", "\n\n", text, flags=re.IGNORECASE)
@@ -176,9 +221,10 @@ def clean(text: str, cfg: dict, level: str = None, style: str = None) -> str:
                      flags=re.IGNORECASE | re.MULTILINE).strip()
         ok = looks_like_cleanup(text, out, NOVEL_MAX.get(level, 0.25),
                                KEEP_MIN.get(level, 0.7))
-        return out if ok else rule_based(text)
+        final = out if ok else rule_based(text)
     except (urllib.error.URLError, OSError, ValueError, KeyError):
-        return rule_based(text)
+        final = rule_based(text)
+    return final if style == "code" else fix_casing(final)
 
 
 def ollama_alive(cfg: dict) -> bool:

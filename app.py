@@ -706,6 +706,9 @@ class LocalFlowApp(rumps.App):
             if not final.strip():
                 final = raw
             final = self.dictionary.apply_fixes(final)
+            if voice.get("style") != "code":
+                # Not for code: "friday" may be a variable and "i" an index.
+                final = self.dictionary.apply_casing(final)
             final = self.snippets.expand(final)
 
             if self.cfg.get("context", {}).get("enabled", True):

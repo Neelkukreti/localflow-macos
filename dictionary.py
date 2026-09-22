@@ -243,6 +243,26 @@ class Dictionary:
         on.sort(key=lambda e: (e.get("source") != "manual", -e.get("count", 0), e["display"].lower()))
         return [e["display"] for e in on[:limit]]
 
+    def apply_casing(self, text):
+        """Restore the casing of words we already know how to spell.
+
+        Whisper and the cleanup model both hand back "supabase" or "opensearch"
+        from time to time. The dictionary already holds the form you use, so
+        this puts it back. Only entries that actually carry capitals are used,
+        and only on whole words.
+        """
+        if not text:
+            return text
+        with self._lock:
+            forms = [e["display"] for e in self.words.values()
+                     if e.get("state") == "on" and any(c.isupper() for c in e["display"])]
+        for display in sorted(forms, key=len, reverse=True):
+            if display in text:
+                continue  # already spelled your way
+            pattern = rf"(?<!\w){re.escape(display)}(?!\w)"
+            text = re.sub(pattern, lambda _m, d=display: d, text, flags=re.IGNORECASE)
+        return text
+
     def listing(self, limit=None):
         """(key, entry) for the menu — on-words first, most-said at the top."""
         with self._lock:

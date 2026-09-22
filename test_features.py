@@ -12,6 +12,7 @@ import cleanup
 import commands
 import languages
 import voices
+from dictionary import Dictionary
 from snippets import Snippets
 
 fails = []
@@ -89,6 +90,35 @@ check("unknown level falls back to the default",
 check("aggressive tolerates more loss",
       cleanup.NOVEL_MAX["aggressive"] > cleanup.NOVEL_MAX["light"], True)
 check("code style exists", "camelCase" in cleanup.STYLES["code"], True)
+
+# ---- casing: a 3B model won't do this reliably, so we do it in code
+for src, want in [
+    ("so i think we should push the launch to friday",
+     "So I think we should push the launch to Friday"),
+    ("i'm going on monday. i'll call you in march.",
+     "I'm going on Monday. I'll call you in March."),
+    ("hello there. how are you?", "Hello there. How are you?"),
+    ("e.g. friday works", "E.g. Friday works"),
+    ("", ""),
+]:
+    check(f"casing {src[:28]!r}", cleanup.fix_casing(src), want)
+check("casing leaves internal capitals alone",
+      cleanup.fix_casing("BTC is up. camelCase stays put. OpenSearch too."),
+      "BTC is up. camelCase stays put. OpenSearch too.")
+check("casing leaves a trademarked lowercase start alone",
+      cleanup.fix_casing("iPhone sales rose"), "iPhone sales rose")
+check("code style skips casing entirely",
+      cleanup.clean("friday branch", {"enabled": True}, level="off", style="code"), "friday branch")
+
+d_case = Dictionary(path=os.path.join(tempfile.mkdtemp(), "dictionary.json"))
+d_case.add("Supabase"); d_case.add("OpenSearch")
+check("dictionary restores its own spelling",
+      d_case.apply_casing("i pushed supabase and opensearch"),
+      "i pushed Supabase and OpenSearch")
+check("dictionary casing leaves correct text untouched",
+      d_case.apply_casing("Supabase is fine"), "Supabase is fine")
+check("dictionary casing respects word boundaries",
+      d_case.apply_casing("supabased"), "supabased")
 
 # ---- microphone fallback order (no PortAudio needed)
 import recorder as rec_mod

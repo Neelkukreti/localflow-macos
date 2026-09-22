@@ -48,6 +48,10 @@ with local models.
 - **Snippets** — a phrase you say expands into text you'd rather not say.
 - **Learned dictionary** — picks up names and jargon you say repeatedly so they're spelled
   your way, with a review pass so it never learns junk.
+- **Casing that actually holds** — sentence starts, the pronoun "I", weekdays and months are
+  fixed in code rather than left to the model, and your dictionary's own spellings are restored.
+  Words with internal capitals (`camelCase`, `iPhone`, `BTC`) are never touched, and the whole
+  pass is skipped for the code voice.
 - **Hinglish and 90+ languages** — Hinglish comes back in Roman script, not Devanagari, with
   proper Hindi schwa deletion (करना → `karna`, not `karanaa`).
 - **Floating status bar** with a live green/red input meter. Click-through so it never
