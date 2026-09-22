@@ -79,6 +79,7 @@ class FlowBar:
         self.always_visible = always_visible
         self.position = position        # [x, y] saved from a previous drag
         self.on_move = on_move          # called with (x, y) to persist it
+        self._drag_mode = False         # see set_draggable()
         self._watcher = None
         self._panel = None
         self._dot = None
@@ -93,12 +94,17 @@ class FlowBar:
         if self.position:
             try:
                 px, py = float(self.position[0]), float(self.position[1])
-                # Only honour a saved spot that's still on a screen — monitors
-                # come and go and an off-screen bar looks like a broken app.
-                if (screen.origin.x - W < px < screen.origin.x + screen.size.width
-                        and screen.origin.y - H < py < screen.origin.y + screen.size.height):
-                    x, y = px, py
-            except (TypeError, ValueError, IndexError):
+                # Honour a saved spot only if it's still on SOME screen — check
+                # every display, not just the main one, or a bar parked on an
+                # external monitor snaps back every launch. Monitors come and go,
+                # and a bar off in dead space looks like a broken app.
+                for sc in (AppKit.NSScreen.screens() or [AppKit.NSScreen.mainScreen()]):
+                    f = sc.frame()
+                    if (f.origin.x - W / 2 < px < f.origin.x + f.size.width
+                            and f.origin.y - H / 2 < py < f.origin.y + f.size.height):
+                        x, y = px, py
+                        break
+            except (TypeError, ValueError, IndexError, AttributeError):
                 pass
         rect = AppKit.NSMakeRect(x, y, W, H)
 
@@ -110,10 +116,12 @@ class FlowBar:
         panel.setOpaque_(False)
         panel.setBackgroundColor_(AppKit.NSColor.clearColor())
         panel.setLevel_(AppKit.NSStatusWindowLevel)
-        # Draggable, so it can be moved out of the way. It stays a
-        # NON-ACTIVATING panel, so dragging it never steals key focus from the
-        # app you're dictating into — that would send the paste to the wrong window.
-        panel.setIgnoresMouseEvents_(False)
+        # Click-through by default. It has to be: the bar floats over whatever
+        # you're working in, and an interactive panel swallows clicks meant for
+        # the app underneath — including the middle click the wheel trigger
+        # replays, which is what makes the wheel look broken.
+        # set_draggable() turns this off only while you're repositioning it.
+        panel.setIgnoresMouseEvents_(not self._drag_mode)
         panel.setMovableByWindowBackground_(True)
         panel.setReleasedWhenClosed_(False)
         panel.setHidesOnDeactivate_(False)
@@ -198,6 +206,26 @@ class FlowBar:
                     self._panel.orderFrontRegardless()
             except Exception:
                 self._panel = None
+        _on_main(do)
+
+    def set_draggable(self, on):
+        """Let the bar be dragged, at the cost of swallowing clicks.
+
+        Only ever on while the user is deliberately repositioning it.
+        """
+        self._drag_mode = bool(on)
+
+        def do():
+            try:
+                if self._panel is None:
+                    self._build()
+                self._panel.setIgnoresMouseEvents_(not self._drag_mode)
+                if self._drag_mode:
+                    self._panel.orderFrontRegardless()
+                elif self._state == "idle" and not self.always_visible:
+                    self._panel.orderOut_(None)
+            except Exception:
+                pass
         _on_main(do)
 
     def _remember_position(self):

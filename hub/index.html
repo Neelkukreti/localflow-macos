@@ -192,6 +192,24 @@ kbd{
         <select id="level"><option value="off">Off — paste raw</option><option value="light">Light</option><option value="standard">Standard</option><option value="aggressive">Aggressive</option></select></div>
       <div class="row"><div class="grow"><div class="t">Microphone</div><div class="s" id="mic-s"></div></div><select id="mic"></select></div>
     </div>
+    <div class="card"><h3>Trigger</h3>
+      <div class="row"><div class="grow"><div class="t">Hold-to-talk key</div><div class="s">Hold it to talk, or double-tap to keep listening hands-free.</div></div>
+        <select id="hold-key"></select></div>
+      <div class="row"><div class="grow"><div class="t">Mouse wheel trigger</div><div class="s">Double-click the wheel to start, one click to finish.</div></div>
+        <button class="tog" id="trig-wheel"></button></div>
+      <div class="row"><div class="grow"><div class="t">Middle click still reaches apps</div><div class="s">A lone middle click is replayed underneath, so browser tabs keep working.</div></div>
+        <button class="tog" id="trig-pass"></button></div>
+      <div class="row"><div class="grow"><div class="t">Hold threshold</div><div class="s">Longer than this counts as a hold, shorter as a tap.</div></div>
+        <input type="range" id="hold-min" min="0.15" max="0.8" step="0.05" style="max-width:130px">
+        <span id="n-hold" style="font-family:var(--mono);color:var(--muted);width:38px;text-align:right;font-size:11px"></span></div>
+      <div class="row"><div class="grow"><div class="t">Double-tap window</div><div class="s">How long to wait for the second tap.</div></div>
+        <input type="range" id="dbl-tap" min="0.2" max="0.8" step="0.05" style="max-width:130px">
+        <span id="n-dbl" style="font-family:var(--mono);color:var(--muted);width:38px;text-align:right;font-size:11px"></span></div>
+      <div class="row"><div class="grow"><div class="t">Move the floating bar</div><div class="s">It's click-through so it never swallows a click. This makes it draggable for 20 seconds.</div></div>
+        <button class="act" id="move-bar">Move</button></div>
+      <div class="row"><div class="grow"><div class="s">Trigger changes need a relaunch — the key taps are created at startup.</div></div>
+        <button class="act primary" id="relaunch">Relaunch</button></div>
+    </div>
     <div class="card"><h3>Behaviour</h3><div id="toggles"></div></div>
     <div class="card"><h3>Shortcuts</h3><div id="keys"></div></div>
   </section>
@@ -272,6 +290,24 @@ async function loadSettings(){
   $('#mic').innerHTML=`<option value="">System default</option>`+d.mics.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')
     +(d.mic_missing?`<option value="${esc(d.mic_missing)}">${esc(d.mic_missing)} (unplugged)</option>`:'');
   $('#mic').value=d.mic||''; $('#mic-s').textContent=d.mic_note;
+  const tr=d.trigger;
+  $('#hold-key').innerHTML=tr.options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  $('#hold-key').value=tr.hold_key;
+  $('#hold-key').onchange=e=>{call('set',{key:'trigger_hold_key',value:e.target.value});toast('Saved — relaunch to apply');};
+  $('#trig-wheel').classList.toggle('on',tr.wheel);
+  $('#trig-wheel').onclick=()=>{const on=!$('#trig-wheel').classList.contains('on');
+    $('#trig-wheel').classList.toggle('on',on);call('set',{key:'trigger_wheel',value:on});toast('Saved — relaunch to apply');};
+  $('#trig-pass').classList.toggle('on',tr.pass_through);
+  $('#trig-pass').onclick=()=>{const on=!$('#trig-pass').classList.contains('on');
+    $('#trig-pass').classList.toggle('on',on);call('set',{key:'pass_through_clicks',value:on});toast('Saved — relaunch to apply');};
+  const bindSec=(sel,label,key)=>{const r=$(sel);r.value=tr[key==='hold_min_seconds'?'hold_min':'double_tap'];
+    $(label).textContent=(+r.value).toFixed(2)+'s';
+    r.oninput=()=>{$(label).textContent=(+r.value).toFixed(2)+'s';};
+    r.onchange=()=>call('set',{key,value:+r.value});};
+  bindSec('#hold-min','#n-hold','hold_min_seconds');
+  bindSec('#dbl-tap','#n-dbl','double_tap_seconds');
+  $('#relaunch').onclick=()=>{toast('Relaunching…');call('relaunch');};
+  $('#move-bar').onclick=async()=>{const r=await call('move_bar');toast(`Drag the bar — ${r.seconds|0}s`);};
   $('#toggles').innerHTML=d.toggles.map(t=>`<div class="row"><div class="grow"><div class="t">${esc(t.label)}</div><div class="s">${esc(t.note)}</div></div>
     <button class="tog ${t.on?'on':''}" data-tog="${esc(t.key)}"></button></div>`).join('');
   $('#toggles').querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{

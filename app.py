@@ -81,6 +81,21 @@ CUE_LABELS = {
     "done": ("Pasted", "When the finished text lands."),
 }
 
+# Hold-to-talk keys you can pick in Settings. Fn is handled by its own Quartz
+# tap (pynput reports Fn press AND release as a release); the rest go through
+# pynput. "none" means the wheel is your only trigger.
+HOLD_KEYS = {
+    "none": "None — mouse wheel only",
+    "fn": "Fn (🌐)",
+    "alt_r": "Right Option",
+    "alt_l": "Left Option",
+    "cmd_r": "Right Command",
+    "ctrl_r": "Right Control",
+    "f13": "F13",
+    "f14": "F14",
+    "f15": "F15",
+}
+
 DEFAULT_SHORTCUTS = {
     "paste_last": "<cmd>+<alt>+v",
     "copy_last": "<cmd>+<alt>+c",
@@ -163,6 +178,7 @@ class LocalFlowApp(rumps.App):
         self._ducked = []
         self._tap_errors = set()
         self._meter_stop = None
+        self._bar_drag_timer = None
         self._job = 0        # bumped per dictation; a stale job's result is dropped
         self._fn_down_at = 0.0
         self._fn_tap_timer = None
@@ -271,37 +287,43 @@ class LocalFlowApp(rumps.App):
 
     # ---------- hotkey handling ----------
 
+    def _trigger_setup(self):
+        """(wheel on?, hold key) — reading the newer keys, falling back to the
+        older `key`/`keep_fn` pair so an existing config keeps working."""
+        trig = self.cfg.get("trigger", {})
+        if "wheel" in trig or "hold_key" in trig:
+            return bool(trig.get("wheel", True)), trig.get("hold_key", "fn")
+        legacy = trig.get("key", "mouse_middle")
+        if legacy in ("mouse_middle", "wheel"):
+            return True, ("fn" if trig.get("keep_fn", True) else "none")
+        return False, (legacy if legacy in HOLD_KEYS else "fn")
+
     def _start_listener(self):
-        trig = self.cfg["trigger"]
-        mode = trig["mode"]
-        if mode == "hold":
-            if trig["key"] in ("mouse_middle", "wheel"):
-                self._start_click_listener()
-                if trig.get("keep_fn", True):  # the Fn key keeps working as a second trigger
-                    self._fn_listener = FnListener(
-                        on_down=self._on_fn_down, on_up=self._on_fn_up,
-                        on_other_key=self._on_fn_combo, on_error=self._tap_failed,
-                    )
-                    self._fn_listener.start()
-                return
-            if trig["key"] == "fn":
-                self._fn_listener = FnListener(
-                    on_down=self._on_fn_down, on_up=self._on_fn_up,
-                    on_other_key=self._on_fn_combo, on_error=self._tap_failed,
-                )
-                self._fn_listener.start()
-                return
-            self.hold_key = KEY_MAP.get(self.cfg["trigger"]["key"], keyboard.Key.alt_r)
-            listener = keyboard.Listener(
-                on_press=self._on_press_hold, on_release=self._on_release_hold
-            )
-        else:
+        if self.cfg.get("trigger", {}).get("mode") == "toggle":
             self.combo = self.cfg["trigger"]["toggle_combo"]
             listener = keyboard.Listener(
                 on_press=self._on_press_toggle, on_release=self._on_release_toggle
             )
-        listener.daemon = True
-        listener.start()
+            listener.daemon = True
+            listener.start()
+            return
+
+        wheel, hold_key = self._trigger_setup()
+        if wheel:
+            self._start_click_listener()
+        if hold_key == "fn":
+            self._fn_listener = FnListener(
+                on_down=self._on_hold_down, on_up=self._on_hold_up,
+                on_other_key=self._on_hold_combo, on_error=self._tap_failed,
+            )
+            self._fn_listener.start()
+        elif hold_key in KEY_MAP:
+            self.hold_key = KEY_MAP[hold_key]
+            listener = keyboard.Listener(
+                on_press=self._on_press_hold, on_release=self._on_release_hold
+            )
+            listener.daemon = True
+            listener.start()
 
     def _start_shortcuts(self):
         """Global hotkeys that don't record: re-paste, re-copy, Command Mode."""
@@ -371,14 +393,14 @@ class LocalFlowApp(rumps.App):
         self.status_item.title = "Listening… (click the wheel to finish)"
 
     def _on_press_hold(self, key):
-        if key == self.hold_key and not self.is_recording and not self.busy:
-            self.start_recording()
+        if key == self.hold_key:
+            self._on_hold_down()
 
     def _on_release_hold(self, key):
-        if key == self.hold_key and self.is_recording:
-            self.stop_and_process()
+        if key == self.hold_key:
+            self._on_hold_up()
 
-    # Fn has three gestures, matching Wispr Flow:
+    # The hold key has three gestures, matching Wispr Flow:
     #   hold                -> talk while held, stops on release
     #   tap, tap            -> hands free, keeps listening until the next tap
     #   tap (while locked)  -> finish
@@ -391,7 +413,7 @@ class LocalFlowApp(rumps.App):
             self._fn_tap_timer.cancel()
             self._fn_tap_timer = None
 
-    def _on_fn_down(self):
+    def _on_hold_down(self):
         if self.busy:
             return
         if self.is_recording and self.hands_free:
@@ -403,13 +425,13 @@ class LocalFlowApp(rumps.App):
             self._cancel_fn_tap_timer()
             self.hands_free = True
             self._set_state(HANDS_FREE)
-            self.status_item.title = "Listening… (tap Fn to finish)"
+            self.status_item.title = "Listening… (tap again to finish)"
             return
         if not self.is_recording:
             self._fn_down_at = time.time()
             self.start_recording()
 
-    def _on_fn_up(self):
+    def _on_hold_up(self):
         if not self.is_recording or self.hands_free:
             return
         hold_min, double_window = self._fn_windows()
@@ -427,7 +449,7 @@ class LocalFlowApp(rumps.App):
         self._fn_tap_timer.daemon = True
         self._fn_tap_timer.start()
 
-    def _on_fn_combo(self):
+    def _on_hold_combo(self):
         if self.is_recording:
             self._cancel_fn_tap_timer()
             self.cancel_recording()  # a shortcut like Fn+Delete, not dictation
@@ -1169,6 +1191,14 @@ class LocalFlowApp(rumps.App):
             "mic_note": (f"{missing} isn't plugged in — falling back."
                          if missing else "Falls back automatically when unplugged."),
             "keys": out,
+            "trigger": {
+                "hold_key": self._trigger_setup()[1],
+                "wheel": self._trigger_setup()[0],
+                "options": [{"value": k, "label": v} for k, v in HOLD_KEYS.items()],
+                "pass_through": bool(self.cfg.get("trigger", {}).get("pass_through_clicks", True)),
+                "hold_min": float(self.cfg.get("trigger", {}).get("hold_min_seconds", 0.35)),
+                "double_tap": float(self.cfg.get("trigger", {}).get("double_tap_seconds", 0.35)),
+            },
             "toggles": [
                 {"key": "read_screen", "label": "Use screen context",
                  "note": "Reads the text around your cursor so a reply matches its thread. "
@@ -1203,6 +1233,16 @@ class LocalFlowApp(rumps.App):
             self._sync_context_label()
         elif key == "duck_audio":
             self.cfg.setdefault("audio", {})["duck_other_audio"] = bool(value)
+        elif key == "trigger_hold_key":
+            if value not in HOLD_KEYS:
+                return {"error": "unknown key"}
+            self.cfg.setdefault("trigger", {})["hold_key"] = value
+        elif key == "trigger_wheel":
+            self.cfg.setdefault("trigger", {})["wheel"] = bool(value)
+        elif key == "pass_through_clicks":
+            self.cfg.setdefault("trigger", {})["pass_through_clicks"] = bool(value)
+        elif key in ("hold_min_seconds", "double_tap_seconds"):
+            self.cfg.setdefault("trigger", {})[key] = float(value)
         elif key == "flow_bar_always":
             self.cfg.setdefault("ui", {})["flow_bar_always"] = bool(value)
             self.flowbar.always_visible = bool(value)
@@ -1225,6 +1265,43 @@ class LocalFlowApp(rumps.App):
     def _hub_test_sound(self, payload):
         cue = payload.get("cue", "start")
         beep(CUES.get(cue, "Tink"), float(payload.get("value", self._cue_volume(cue))))
+        return {"ok": True}
+
+    def _hub_move_bar(self, payload):
+        """Make the floating bar draggable for a moment, then click-through again."""
+        seconds = float(payload.get("seconds", 20))
+        self.flowbar.set_draggable(True)
+        self.flowbar.set_state(self._bar_state_now())
+        if getattr(self, "_bar_drag_timer", None) is not None:
+            self._bar_drag_timer.cancel()
+        t = threading.Timer(seconds, lambda: self.flowbar.set_draggable(False))
+        t.daemon = True
+        t.start()
+        self._bar_drag_timer = t
+        return {"ok": True, "seconds": seconds}
+
+    def _bar_state_now(self):
+        if not self.is_recording:
+            return "idle"
+        return "command" if self.mode == "command" else (
+            HANDS_FREE if self.hands_free else RECORDING)
+
+    def _hub_relaunch(self, _payload):
+        """Restart so new trigger settings take hold.
+
+        The Quartz event taps are created once at launch and run their own run
+        loops, so switching the hold key means starting over. Relaunch is handed
+        to a detached shell that waits for this process to release its lock.
+        """
+        try:
+            subprocess.Popen(
+                ["/bin/sh", "-c", "sleep 1.5; open -a LocalFlow"],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            return {"error": str(e)}
+        rumps.Timer(lambda _t: rumps.quit_application(), 0.4).start()
         return {"ok": True}
 
     def _hub_open_pane(self, payload):

@@ -112,5 +112,26 @@ try:
 finally:
     rec_mod.sd = real_sd
 
+# ---- trigger resolution: the wheel and the hold key are independent, and an
+# older config (key / keep_fn) must still resolve to the same behaviour.
+try:
+    import app as _app
+except Exception as e:                      # pragma: no cover
+    print(f"SKIP trigger tests (no AppKit here: {e})")
+else:
+    class _Cfg(_app.LocalFlowApp):
+        def __init__(self, cfg): self.cfg = cfg
+    for trig, want in [
+        ({"wheel": True, "hold_key": "fn"}, (True, "fn")),
+        ({"wheel": False, "hold_key": "alt_r"}, (False, "alt_r")),
+        ({"wheel": True, "hold_key": "none"}, (True, "none")),
+        ({"key": "mouse_middle", "keep_fn": True}, (True, "fn")),
+        ({"key": "mouse_middle", "keep_fn": False}, (True, "none")),
+        ({"key": "fn"}, (False, "fn")),
+        ({"key": "alt_r"}, (False, "alt_r")),
+        ({}, (True, "fn")),
+    ]:
+        check(f"trigger {trig or 'defaults'}", _Cfg({"trigger": trig})._trigger_setup(), want)
+
 print("\n" + ("ALL PASS" if not fails else f"FAILURES: {fails}"))
 raise SystemExit(1 if fails else 0)

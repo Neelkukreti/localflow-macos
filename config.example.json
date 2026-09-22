@@ -11,7 +11,9 @@
     "double_click_seconds": 0.35,
     "pass_through_clicks": true,
     "hold_min_seconds": 0.35,
-    "double_tap_seconds": 0.35
+    "double_tap_seconds": 0.35,
+    "wheel": true,
+    "hold_key": "fn"
   },
   "whisper": {
     "model": "mlx-community/whisper-large-v3-turbo",
@@ -43,7 +45,7 @@
     "enabled": true,
     "history_chars": 1200,
     "vocabulary": [],
-    "read_screen": true,
+    "read_screen": false,
     "screen_chars": 300
   },
   "sound_volume": 0.3,
@@ -124,8 +126,8 @@
   },
   "sound_volumes": {
     "start": 0.35,
-    "stop": 0.2,
-    "done": 0.05
+    "stop": 0.4,
+    "done": 0.3
   },
   "transcribe_timeout": 180
 }

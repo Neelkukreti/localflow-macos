@@ -50,7 +50,8 @@ with local models.
   your way, with a review pass so it never learns junk.
 - **Hinglish and 90+ languages** — Hinglish comes back in Roman script, not Devanagari, with
   proper Hindi schwa deletion (करना → `karna`, not `karanaa`).
-- **Floating status bar** with a live green/red input meter, draggable anywhere.
+- **Floating status bar** with a live green/red input meter. Click-through so it never
+  swallows a click; Settings → *Move* makes it draggable for 20 seconds.
 - **Scratchpad** — a floating notepad to dictate into when there's no text field.
 - **Never types into password fields** — detects macOS secure input and uses the clipboard.
 - **Menu-bar app** with a proper window: status, history, dictionary, snippets, settings.
@@ -91,8 +92,8 @@ tells you exactly which grant is missing and opens the right settings pane.
 
 | Gesture | What happens |
 |---|---|
-| **Hold Fn** | Records while held, transcribes on release |
-| **Double-tap Fn** | Hands-free — keeps listening until you tap again |
+| **Hold the trigger key** | Records while held, transcribes on release |
+| **Double-tap it** | Hands-free — keeps listening until you tap again |
 | **Double-click the mouse wheel** | Hands-free; one click finishes |
 | **⌘⌥J** | Command Mode |
 | **⌘⌥S** | Scratchpad |
@@ -100,6 +101,10 @@ tells you exactly which grant is missing and opens the right settings pane.
 
 A lone middle click still reaches the app underneath (~0.35 s later), so middle-click keeps
 opening and closing browser tabs. Only the clicks that start and stop a dictation are swallowed.
+
+Both triggers are configurable in **Settings → Trigger**: pick the hold key (Fn, either Option,
+right Command, right Control, F13–F15, or none), turn the wheel trigger on or off, and tune the
+hold threshold and double-tap window. Trigger changes need a relaunch — there's a button for it.
 
 ## Configuration
 
