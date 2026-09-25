@@ -54,7 +54,8 @@ class _WindowWatcher(NSObject):
         return self
 
     def windowWillClose_(self, _notification):
-        self._hub._go_accessory()
+        # Closing with the red button should free the web view too, not just hide it.
+        self._hub._release_soon()
 
 
 class _Bridge(NSObject):
@@ -149,6 +150,46 @@ class Hub:
             NSURL.fileURLWithPath_(INDEX), NSURL.fileURLWithPath_(HUB_DIR)
         )
 
+    def _teardown(self):
+        """Actually free the web view. Main thread only.
+
+        Dropping our references is not enough: addScriptMessageHandler_ retains
+        the bridge strongly, and the bridge holds the web view, so
+        web view -> configuration -> content controller -> bridge -> web view is
+        a cycle and nothing is ever released. Every close and reopen used to
+        leave another WebContent process behind. Remove the handler to break the
+        cycle, then detach the view from the window.
+        """
+        web = self._webview
+        if web is not None:
+            try:
+                web.stopLoading()
+            except Exception:
+                pass
+            try:
+                web.configuration().userContentController() \
+                   .removeScriptMessageHandlerForName_("lf")
+            except Exception:
+                pass
+            try:
+                web.removeFromSuperview()
+            except Exception:
+                pass
+        if self._bridge is not None:
+            self._bridge._webview = None
+        if self._window is not None:
+            try:
+                self._window.setContentView_(None)
+                self._window.setDelegate_(None)
+            except Exception:
+                pass
+        self._window = self._webview = self._bridge = self._watcher = None
+
+    def _release_soon(self):
+        """From windowWillClose_: let AppKit finish closing first, then free it."""
+        NSOperationQueue.mainQueue().addOperationWithBlock_(self._teardown)
+        self._go_accessory()
+
     def _go_accessory(self):
         """Back to menu-bar-only: no Dock icon, no Cmd+Tab entry."""
         def do():
@@ -180,10 +221,21 @@ class Hub:
                 self._window = self._webview = None
         _on_main(do)
 
-    def close(self):
+    def close(self, release=True):
+        """Hide the window and, by default, tear the web view down.
+
+        A WKWebView keeps three XPC processes alive (~60MB) for as long as it
+        exists. Nothing needs them while the window is shut, and rebuilding it
+        costs a few hundred milliseconds on the next open.
+        """
         def do():
-            if self._window is not None:
-                self._window.orderOut_(None)
+            try:
+                if self._window is not None:
+                    self._window.orderOut_(None)
+                    if release:
+                        self._teardown()
+            except Exception:
+                pass
             self._go_accessory()
         _on_main(do)
 

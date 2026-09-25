@@ -20,14 +20,22 @@
     "model": "mlx-community/whisper-large-v3-turbo",
     "language": "en",
     "language_mode": "en",
-    "romanize": true
+    "romanize": true,
+    "preload": true,
+    "decode": {
+      "temperature": 0.0,
+      "condition_on_previous_text": false
+    }
   },
   "cleanup": {
     "enabled": true,
     "model": "llama3.2:3b",
     "ollama_url": "http://localhost:11434",
-    "level": "standard",
-    "style": "default"
+    "level": "light",
+    "style": "default",
+    "fast_path": true,
+    "fast_path_words": 12,
+    "keep_alive": "10m"
   },
   "audio": {
     "input_device": null,
@@ -130,5 +138,5 @@
     "stop": 0.4,
     "done": 0.3
   },
-  "transcribe_timeout": 180
+  "transcribe_timeout": 90
 }

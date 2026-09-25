@@ -137,12 +137,39 @@ def rule_based(text: str) -> str:
     return t
 
 
+# Spoken punctuation/formatting the model is needed for.
+SPOKEN_CMDS = re.compile(
+    r"\b(new (paragraph|line)|question mark|exclamation (mark|point)|full stop|comma|period)\b",
+    re.IGNORECASE)
+
+
+def needs_model(text: str, max_words: int = 12) -> bool:
+    """Is this transcript worth waking a 3B model for?
+
+    Whisper already punctuates and capitalises reasonable speech. A short,
+    filler-free line that already ends in a full stop gains almost nothing from
+    the LLM, and the rule-based tidy does the same job in under a millisecond
+    instead of ~400ms (or ~4s when Ollama has to reload the model first).
+    """
+    text = (text or "").strip()
+    if not text:
+        return False
+    if FILLERS.search(text) or SPOKEN_CMDS.search(text):
+        return True
+    if len(WORD_COUNT.findall(text)) > max_words:
+        return True                       # long enough to want real sentence work
+    return text[-1] not in ".!?"          # unpunctuated: let the model finish it
+
+
+WORD_COUNT = re.compile(r"[A-Za-z0-9']+")
+
+
 def _wrap(text: str) -> str:
     return f"<transcript>{text}</transcript>"
 
 
 def _ollama_generate(text: str, model: str, url: str, timeout: float = 30.0,
-                     extra: str = "") -> str:
+                     extra: str = "", keep_alive: str = "10m") -> str:
     system = SYSTEM_PROMPT + ("\n" + extra if extra else "")
     messages = [{"role": "system", "content": system}]
     for raw, cleaned in EXAMPLES:
@@ -153,7 +180,11 @@ def _ollama_generate(text: str, model: str, url: str, timeout: float = 30.0,
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0},
+        "options": {"temperature": 0, "num_predict": 400},
+        # Ollama evicts an idle model after 5 minutes by default, and the reload
+        # costs ~3.5s on the next dictation. Holding it longer trades RAM for
+        # never making you wait; set cleanup.keep_alive to tune it.
+        "keep_alive": keep_alive,
     }
     req = urllib.request.Request(
         f"{url.rstrip('/')}/api/chat",
@@ -208,12 +239,17 @@ def clean(text: str, cfg: dict, level: str = None, style: str = None) -> str:
     style = (style or cfg.get("style") or DEFAULT_STYLE).lower()
     extra = " ".join(p for p in (LEVELS[level], STYLES.get(style, "")) if p)
 
+    # Fast path: skip the model entirely when there's nothing for it to do.
+    if cfg.get("fast_path", True) and not needs_model(text, cfg.get("fast_path_words", 12)):
+        return text if style == "code" else fix_casing(text)
+
     try:
         out = _ollama_generate(
             text,
             cfg.get("model", "llama3.2:3b"),
             cfg.get("ollama_url", "http://localhost:11434"),
             extra=extra,
+            keep_alive=cfg.get("keep_alive", "10m"),
         )
         # Strip wrapping quotes/tags the model sometimes adds.
         out = re.sub(r"</?transcript>", "", out).strip().strip('"').strip()

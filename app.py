@@ -20,6 +20,7 @@ import subprocess
 
 import numpy as np
 import rumps
+from AppKit import NSWorkspace, NSSound
 from pynput import keyboard
 
 import cleanup
@@ -132,25 +133,58 @@ def rms(audio):
 
 
 def frontmost_app():
+    """Name of the app you're typing into, used to pick the voice.
+
+    NSWorkspace rather than AppleScript: the osascript round-trip cost ~80ms
+    and ran on the critical path of every dictation.
+    """
     try:
-        out = subprocess.run(
-            ["osascript", "-e", 'tell application "System Events" to get name of first process whose frontmost is true'],
-            capture_output=True, text=True, timeout=1, env=UTF8_ENV,
-        )
-        return out.stdout.strip() or None
+        running = NSWorkspace.sharedWorkspace().frontmostApplication()
+        return str(running.localizedName()) if running else None
     except Exception:
         return None
 
 
+_SOUNDS = {}
+
+
+def prewarm_sounds(names):
+    """Load the cue sounds off the critical path — the first play of an NSSound
+    reads the file and costs ~0.5s, which would land on your first dictation."""
+    def load():
+        for name in names:
+            try:
+                _SOUNDS[name] = NSSound.alloc().initWithContentsOfFile_byReference_(
+                    f"/System/Library/Sounds/{name}.aiff", True)
+            except Exception:
+                pass
+    threading.Thread(target=load, daemon=True).start()
+
+
 def beep(name, volume=1.0):
     """Play a system sound. Volume is a 0-1 multiplier — the cues are meant to be
-    felt, not heard across the room, so the default in config.json is low."""
+    felt, not heard across the room, so the default in config.json is low.
+
+    Uses a cached NSSound rather than spawning afplay: three cues per dictation
+    is three fork/execs for something that should be free.
+    """
+    volume = max(0.0, min(float(volume), 1.0))
+    path = f"/System/Library/Sounds/{name}.aiff"
     try:
-        subprocess.Popen(
-            ["afplay", "-v", f"{max(0.0, min(float(volume), 1.0)):.2f}",
-             f"/System/Library/Sounds/{name}.aiff"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        sound = _SOUNDS.get(name)
+        if sound is None:
+            sound = NSSound.alloc().initWithContentsOfFile_byReference_(path, True)
+            _SOUNDS[name] = sound
+        if sound is not None:
+            sound.setVolume_(volume)
+            sound.stop()          # so a rapid second cue restarts rather than no-ops
+            sound.play()
+            return
+    except Exception:
+        pass
+    try:
+        subprocess.Popen(["afplay", "-v", f"{volume:.2f}", path],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
@@ -158,6 +192,7 @@ def beep(name, volume=1.0):
 class LocalFlowApp(rumps.App):
     def __init__(self):
         menubar_icon.prewarm()
+        prewarm_sounds(CUES.values())
         super().__init__("LocalFlow", icon=menubar_icon.icon_for(IDLE),
                          template=True, quit_button=None)
         self.cfg = load_config()
@@ -241,6 +276,7 @@ class LocalFlowApp(rumps.App):
         self._start_listener()
         self._start_shortcuts()
         self._warn_if_ollama_down()
+        self._preload_models()
         _install_reopen_hook()
         if ui.get("open_hub_on_launch", True):
             self.hub.open()
@@ -531,7 +567,7 @@ class LocalFlowApp(rumps.App):
     def _arm_watchdog(self, job):
         """If transcription wedges, don't leave the app stuck on ⏳ forever."""
         self._clear_watchdog()
-        limit = self.cfg.get("transcribe_timeout", 180)
+        limit = self.cfg.get("transcribe_timeout", 90)
         if not limit:
             return
 
@@ -1313,6 +1349,21 @@ class LocalFlowApp(rumps.App):
     def _hub_open_pane(self, payload):
         permissions.open_pane(payload.get("which"))
         return {"ok": True}
+
+    def _preload_models(self):
+        """Load the Whisper weights in the background at startup.
+
+        They become resident on the first dictation anyway, so doing it now
+        costs no extra memory in the long run and takes ~5s off the first thing
+        you say after launching.
+        """
+        if not self.cfg["whisper"].get("preload", True):
+            return
+
+        def load():
+            if transcribe.preload(self.cfg["whisper"]):
+                self.status_item.title = "Idle"
+        threading.Thread(target=load, daemon=True).start()
 
     def _warn_if_ollama_down(self):
         """Start Ollama if it isn't up. run.sh used to do this, but launching from

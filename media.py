@@ -7,7 +7,26 @@ running AND already playing are touched, and only those get resumed.
 
 import subprocess
 
-PLAYERS = ("Spotify", "Music")
+# name -> bundle id, so we can ask NSWorkspace whether it's running before
+# paying for an AppleScript round-trip. Most dictations have neither open, and
+# two osascript calls per dictation for a "no" is the wrong trade.
+PLAYERS = {"Spotify": "com.spotify.client", "Music": "com.apple.Music"}
+
+try:
+    from AppKit import NSWorkspace
+except Exception:  # pragma: no cover — headless
+    NSWorkspace = None
+
+
+def _running_players():
+    if NSWorkspace is None:
+        return list(PLAYERS)
+    try:
+        ids = {str(a.bundleIdentifier() or "")
+               for a in NSWorkspace.sharedWorkspace().runningApplications()}
+    except Exception:
+        return list(PLAYERS)
+    return [name for name, bundle in PLAYERS.items() if bundle in ids]
 
 
 def _osa(script, timeout=2):
@@ -22,8 +41,9 @@ def _osa(script, timeout=2):
 def pause_players():
     """Pause whatever is playing; returns the apps to hand back to resume()."""
     paused = []
-    for app in PLAYERS:
-        # `running` check first: touching `player state` would launch the app.
+    for app in _running_players():
+        # Still guard with `is running`: NSWorkspace can race a quitting app,
+        # and touching `player state` would relaunch it.
         state = _osa(
             f'if application "{app}" is running then '
             f'tell application "{app}" to return player state as text'

@@ -135,6 +135,34 @@ order, whether to read screen context, and whether to pause music while listenin
    question instead of transcribing it.
 4. `paste.py` writes to the clipboard and sends ⌘V, then restores what was there before.
 
+## Performance
+
+Measured on an Apple Silicon Mac, `whisper-large-v3-turbo`, `llama3.2:3b`:
+
+| | |
+|---|---|
+| Idle CPU | 0.0% |
+| 9 s of speech, end to end | ~4 s |
+| Whisper on 9 s of clean speech | ~1.2 s |
+| Short, clean dictation (skips the LLM) | cleanup in < 1 ms |
+
+Things that keep it light:
+
+- **Whisper decoding is pinned** to one pass (`temperature=0`) with no self-conditioning. Its
+  default temperature fallback silently re-decodes the same audio up to six times when the
+  output looks poor — on a quiet or noisy clip that took one test from **5.5 s to 113 s**, which
+  is what "the app hangs" feels like. On clean speech the change is neutral.
+- **The LLM is skipped** when a transcript is short, filler-free and already punctuated.
+- **No subprocesses on the hot path**: the pasteboard, the ⌘V keystroke, the frontmost-app
+  lookup, the cues and the music check all use native APIs (the frontmost-app lookup alone went
+  from ~430 ms of AppleScript to ~2 ms).
+- **Whisper preloads** in the background at launch, so the first dictation isn't the slow one.
+- **The window frees its web view** when you close it.
+- A **watchdog** abandons a transcription that runs past `transcribe_timeout` (90 s).
+
+To go lighter still, set `whisper.model` to a smaller MLX Whisper, `cleanup.enabled` to `false`,
+or a shorter `cleanup.keep_alive` so Ollama releases its model sooner (it reloads in ~3 s).
+
 ## FAQ
 
 **Does any audio leave my Mac?** No. There is no network call in the dictation path. Ollama and

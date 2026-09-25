@@ -86,6 +86,7 @@ class FlowBar:
         self._label = None
         self._segs = []
         self._state = "idle"
+        self._lit = -1          # last segment count drawn, to skip no-op redraws
 
     def _build(self):
         screen = AppKit.NSScreen.mainScreen().visibleFrame()
@@ -253,6 +254,9 @@ class FlowBar:
         lit = int(round(level * SEGMENTS))
         if level > 0 and lit == 0:
             lit = 1
+        if lit == self._lit:
+            return          # nothing would change; don't wake the main thread
+        self._lit = lit
         if level >= HOT:
             color = RED
         elif level < QUIET:
@@ -277,6 +281,7 @@ class FlowBar:
         _on_main(do)
 
     def clear_level(self):
+        self._lit = -1
         self.set_level(0.0)
 
     def hide(self):
