@@ -11,7 +11,7 @@ Two independent jobs, both read-only:
 
 pyobjc resolves framework attributes lazily and is NOT thread-safe about it, and
 everything here gets called from the worker thread. Every symbol is therefore
-pulled onto the main thread at import time, exactly like fn_key/mouse_trigger.
+pulled onto the main thread at import time, exactly like fn_key.
 Do not delete _WARMED.
 """
 

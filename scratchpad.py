@@ -8,7 +8,7 @@ focus. Plain text, autosaved to scratchpad.md next to the app.
 AppKit objects may only be touched on the main thread, and dictations finish on
 a worker thread, so append() hops threads via the main NSOperationQueue. Every
 AppKit symbol is resolved at import time (the pyobjc lazy-attribute race that
-bit fn_key/mouse_trigger) — do not delete _WARMED.
+bit fn_key) — do not delete _WARMED.
 """
 
 import os

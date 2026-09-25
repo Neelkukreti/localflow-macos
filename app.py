@@ -1,7 +1,7 @@
 """LocalFlow — a fully local, Wispr-Flow-style dictation menu-bar app.
 
-Double-click the mouse wheel to start listening and click once to finish (or
-hold the Fn key and speak). Audio is transcribed locally with MLX Whisper,
+Hold the Fn key (or another key you pick) and speak, or double-tap it to keep
+listening hands-free. Audio is transcribed locally with MLX Whisper,
 cleaned up by a local Ollama model, and pasted into the frontmost app.
 
 Which cleanup it gets depends on where you're typing (voices.py), what you say
@@ -20,6 +20,8 @@ import subprocess
 
 import numpy as np
 import rumps
+import mainthread
+mainthread.install()   # before anything builds a menu — see mainthread.py
 from AppKit import NSWorkspace, NSSound
 from pynput import keyboard
 
@@ -39,10 +41,9 @@ from dictionary import Dictionary
 from snippets import Snippets
 from scratchpad import Scratchpad
 from hub import Hub
+from remote import Remote
 from flowbar import FlowBar
 from fn_key import FnListener
-import mouse_trigger
-from mouse_trigger import ClickTrigger, MiddleClickListener
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "config.json")
@@ -85,9 +86,8 @@ CUE_LABELS = {
 
 # Hold-to-talk keys you can pick in Settings. Fn is handled by its own Quartz
 # tap (pynput reports Fn press AND release as a release); the rest go through
-# pynput. "none" means the wheel is your only trigger.
+# pynput.
 HOLD_KEYS = {
-    "none": "None — mouse wheel only",
     "fn": "Fn (🌐)",
     "alt_r": "Right Option",
     "alt_l": "Left Option",
@@ -103,7 +103,35 @@ DEFAULT_SHORTCUTS = {
     "copy_last": "<cmd>+<alt>+c",
     "command_mode": "<cmd>+<alt>+j",
     "scratchpad": "<cmd>+<alt>+s",
+    # A press-once toggle, for a Stream Deck key (or anything that can't hold a
+    # key down). F18 because no Mac keyboard has one, so it collides with nothing.
+    "toggle_dictation": "<f18>",
 }
+
+
+class HotKeys(keyboard.Listener):
+    """pynput's GlobalHotKeys, minus one rule.
+
+    pynput 1.8 drops every *injected* key event in GlobalHotKeys (`if not
+    injected:`). A Stream Deck "Hotkey" action, Keyboard Maestro and
+    BetterTouchTool all inject their keystrokes, so a shortcut fired from any of
+    them would never arrive. The matching logic is pynput's own HotKey; only the
+    injected filter is gone. LocalFlow's own synthetic Cmd+V and Return can't
+    trip a binding: none is bound to them.
+    """
+
+    def __init__(self, bindings):
+        self._hotkeys = [keyboard.HotKey(keyboard.HotKey.parse(combo), fn)
+                         for combo, fn in bindings.items()]
+        super().__init__(on_press=self._press, on_release=self._release)
+
+    def _press(self, key, injected=False):
+        for hk in self._hotkeys:
+            hk.press(self.canonical(key))
+
+    def _release(self, key, injected=False):
+        for hk in self._hotkeys:
+            hk.release(self.canonical(key))
 
 
 def load_config():
@@ -208,7 +236,6 @@ class LocalFlowApp(rumps.App):
         self.busy = False
         self.hands_free = False
         self.mode = "dictate"       # or "command"
-        self.click_trigger = None
         self._pressed = set()
         self._timers = []
         self._ducked = []
@@ -275,6 +302,8 @@ class LocalFlowApp(rumps.App):
         self._build_lang_menu()
         self._start_listener()
         self._start_shortcuts()
+        # Stream Deck / scripts: `notifyutil -p com.localflow.toggle` (see remote.py)
+        Remote({"toggle": self._hk_toggle_dictation, "stop": self.force_idle}).start()
         self._warn_if_ollama_down()
         self._preload_models()
         _install_reopen_hook()
@@ -283,12 +312,20 @@ class LocalFlowApp(rumps.App):
 
     def _set_state(self, state):
         """Swap the menu-bar logo. Idle rides macOS's template inversion; the
-        active states are coloured, so template mode has to be off for them."""
+        active states are coloured, so template mode has to be off for them.
+
+        rumps.App has no set_icon(); the old call raised and silently fell back
+        to text glyphs, so the coloured logo never showed. It's the icon and
+        template properties. Both queue onto the main thread (mainthread.py),
+        in order, so template is applied before the image it describes.
+        """
         self.flowbar.set_state(state)
         path = menubar_icon.icon_for(state)
         if path:
             try:
-                self.set_icon(path, template=(state == IDLE))
+                self.template = (state == IDLE)
+                self.icon = path
+                self.title = None
                 return
             except Exception:
                 pass
@@ -325,15 +362,12 @@ class LocalFlowApp(rumps.App):
     # ---------- hotkey handling ----------
 
     def _trigger_setup(self):
-        """(wheel on?, hold key) — reading the newer keys, falling back to the
-        older `key`/`keep_fn` pair so an existing config keeps working."""
+        """The hold-to-talk key. Older configs named the mouse wheel here, which
+        is gone (it swallowed middle clicks meant for other apps), so anything
+        that isn't a known key falls back to Fn."""
         trig = self.cfg.get("trigger", {})
-        if "wheel" in trig or "hold_key" in trig:
-            return bool(trig.get("wheel", True)), trig.get("hold_key", "fn")
-        legacy = trig.get("key", "mouse_middle")
-        if legacy in ("mouse_middle", "wheel"):
-            return True, ("fn" if trig.get("keep_fn", True) else "none")
-        return False, (legacy if legacy in HOLD_KEYS else "fn")
+        key = trig.get("hold_key") or trig.get("key") or "fn"
+        return key if key in HOLD_KEYS else "fn"
 
     def _start_listener(self):
         if self.cfg.get("trigger", {}).get("mode") == "toggle":
@@ -345,9 +379,7 @@ class LocalFlowApp(rumps.App):
             listener.start()
             return
 
-        wheel, hold_key = self._trigger_setup()
-        if wheel:
-            self._start_click_listener()
+        hold_key = self._trigger_setup()
         if hold_key == "fn":
             self._fn_listener = FnListener(
                 on_down=self._on_hold_down, on_up=self._on_hold_up,
@@ -370,12 +402,13 @@ class LocalFlowApp(rumps.App):
             keys.get("copy_last"): self._hk_copy_last,
             keys.get("command_mode"): self._hk_command_mode,
             keys.get("scratchpad"): lambda: self.toggle_scratchpad(None),
+            keys.get("toggle_dictation"): self._hk_toggle_dictation,
         }
         binding = {k: v for k, v in binding.items() if k}
         if not binding:
             return
         try:
-            hk = keyboard.GlobalHotKeys(binding)
+            hk = HotKeys(binding)
             hk.daemon = True
             hk.start()
             self._hotkeys = hk
@@ -391,6 +424,20 @@ class LocalFlowApp(rumps.App):
             subprocess.run(["pbcopy"], input=self.last_text, text=True, env=UTF8_ENV)
             self._cue("stop")
 
+    def _hk_toggle_dictation(self):
+        """Press once to start listening hands-free, again to transcribe."""
+        if self.busy:
+            return
+        if self.is_recording:
+            self._cancel_fn_tap_timer()
+            self.stop_and_process()
+            return
+        self.mode = "dictate"
+        self.start_recording()
+        self.hands_free = True
+        self._set_state(HANDS_FREE)
+        self.status_item.title = "Listening… (press again to finish)"
+
     def _hk_command_mode(self):
         """Press once to start listening for an instruction, again to run it."""
         if self.busy:
@@ -404,32 +451,6 @@ class LocalFlowApp(rumps.App):
         self.hands_free = True
         self._set_state(COMMAND)
         self.status_item.title = "Command… (say what to do, press again)"
-
-    def _start_click_listener(self):
-        trig = self.cfg["trigger"]
-        mouse_trigger.set_logging(trig.get("debug_log", False))
-
-        def build(replay):  # the listener owns replaying a click it held back
-            self.click_trigger = ClickTrigger(
-                on_start=self._start_listening,
-                on_stop=self.stop_and_process,
-                is_active=lambda: not self.busy and not self.is_recording,
-                replay=replay,
-                double_seconds=trig.get("double_click_seconds", 0.35),
-                hold_seconds=trig.get("hold_min_seconds", 0.35),
-            )
-            return self.click_trigger
-
-        listener = MiddleClickListener(build, pass_through=trig.get("pass_through_clicks", True))
-        listener.on_error = self._tap_failed
-        listener.start()
-
-    def _start_listening(self):
-        """Double-click: record hands-free until the next click."""
-        self.start_recording()
-        self.hands_free = True
-        self._set_state(HANDS_FREE)
-        self.status_item.title = "Listening… (click the wheel to finish)"
 
     def _on_press_hold(self, key):
         if key == self.hold_key:
@@ -556,8 +577,6 @@ class LocalFlowApp(rumps.App):
         self.hands_free = False
         self.mode = "dictate"
         self.busy = False
-        if self.click_trigger is not None:
-            self.click_trigger.reset()
         self._unduck()
         self._set_state(IDLE)
         self.status_item.title = "Idle"
@@ -666,8 +685,6 @@ class LocalFlowApp(rumps.App):
         self._clear_timers()
         self._stop_meter()
         self._cancel_fn_tap_timer()
-        if self.click_trigger is not None:
-            self.click_trigger.reset()
         self.recorder.stop()
         self._unduck()
         self._set_state(IDLE)
@@ -1213,7 +1230,8 @@ class LocalFlowApp(rumps.App):
         chosen = self.recorder.device
         missing = chosen if chosen and chosen not in names else None
         labels = {"paste_last": "Paste last dictation", "copy_last": "Copy last dictation",
-                  "command_mode": "Command Mode", "scratchpad": "Scratchpad"}
+                  "command_mode": "Command Mode", "scratchpad": "Scratchpad",
+                  "toggle_dictation": "Start / stop dictation (Stream Deck)"}
         keys = {**DEFAULT_SHORTCUTS, **(self.cfg.get("shortcuts") or {})}
         pretty = {"<cmd>": "⌘", "<alt>": "⌥", "<ctrl>": "⌃", "<shift>": "⇧", "+": ""}
         out = []
@@ -1222,7 +1240,8 @@ class LocalFlowApp(rumps.App):
             for a, b in pretty.items():
                 combo = combo.replace(a, b)
             out.append({"label": label, "combo": combo.upper()})
-        out.append({"label": "Dictate", "combo": "FN  ·  WHEEL ×2"})
+        out.append({"label": "Dictate (hold, or double-tap to lock)",
+                    "combo": HOLD_KEYS.get(self._trigger_setup(), "Fn").split(" (")[0].upper()})
         return {
             "cues": [{"key": k, "label": CUE_LABELS[k][0], "note": CUE_LABELS[k][1],
                       "value": self._cue_volume(k)} for k in CUE_VOLUME_KEYS],
@@ -1234,10 +1253,8 @@ class LocalFlowApp(rumps.App):
                          if missing else "Falls back automatically when unplugged."),
             "keys": out,
             "trigger": {
-                "hold_key": self._trigger_setup()[1],
-                "wheel": self._trigger_setup()[0],
+                "hold_key": self._trigger_setup(),
                 "options": [{"value": k, "label": v} for k, v in HOLD_KEYS.items()],
-                "pass_through": bool(self.cfg.get("trigger", {}).get("pass_through_clicks", True)),
                 "hold_min": float(self.cfg.get("trigger", {}).get("hold_min_seconds", 0.35)),
                 "double_tap": float(self.cfg.get("trigger", {}).get("double_tap_seconds", 0.35)),
             },
@@ -1279,10 +1296,6 @@ class LocalFlowApp(rumps.App):
             if value not in HOLD_KEYS:
                 return {"error": "unknown key"}
             self.cfg.setdefault("trigger", {})["hold_key"] = value
-        elif key == "trigger_wheel":
-            self.cfg.setdefault("trigger", {})["wheel"] = bool(value)
-        elif key == "pass_through_clicks":
-            self.cfg.setdefault("trigger", {})["pass_through_clicks"] = bool(value)
         elif key in ("hold_min_seconds", "double_tap_seconds"):
             self.cfg.setdefault("trigger", {})[key] = float(value)
         elif key == "flow_bar_always":

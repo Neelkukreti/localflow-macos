@@ -12,8 +12,8 @@ If you're looking for a **Wispr Flow alternative**, a **Superwhisper alternative
 > searching for a private dictation app will find it.
 
 ```
-double-tap Fn  →  🔴 listening  →  tap to finish  →  Whisper (local)
-               →  Ollama cleanup (local)          →  pasted at your cursor
+hold Fn  →  🔴 listening  →  release  →  Whisper (local)
+         →  Ollama cleanup (local)    →  pasted at your cursor
 ```
 
 > **On Windows?** See [LocalFlow for Windows](https://github.com/Neelkukreti/LocalFlow) —
@@ -37,7 +37,9 @@ with local models.
 
 ## Features
 
-- **Hold to talk, or double-tap to lock hands-free** — Fn (🌐) or the mouse wheel.
+- **Hold to talk, or double-tap to lock hands-free** — Fn (🌐) or a key you pick.
+- **Stream Deck / scripting**: `notifyutil -p com.localflow.toggle` starts or finishes a
+  dictation — no keystroke permissions needed. F18 does the same from a keyboard remapper.
 - **Local Whisper** (`whisper-large-v3-turbo` via MLX, on the Apple GPU).
 - **Local AI cleanup** via Ollama — removes "um", fixes punctuation, obeys "new paragraph".
   If Ollama isn't running it falls back to fast rule-based tidying.
@@ -54,8 +56,8 @@ with local models.
   pass is skipped for the code voice.
 - **Hinglish and 90+ languages** — Hinglish comes back in Roman script, not Devanagari, with
   proper Hindi schwa deletion (करना → `karna`, not `karanaa`).
-- **Floating status bar** with a live green/red input meter. Click-through so it never
-  swallows a click; Settings → *Move* makes it draggable for 20 seconds.
+- **A tiny black status pill**, like Wispr Flow's: a sliver when idle (optional), just wide
+  enough for a level meter while you talk. Click-through; Settings → *Move* to reposition.
 - **Scratchpad** — a floating notepad to dictate into when there's no text field.
 - **Never types into password fields** — detects macOS secure input and uses the clipboard.
 - **Menu-bar app** with a proper window: status, history, dictionary, snippets, settings.
@@ -86,15 +88,13 @@ macOS will ask for three, all under System Settings → Privacy & Security:
 | Permission | Why |
 |---|---|
 | **Microphone** | To record you at all |
-| **Input Monitoring** | For the Fn key, the mouse-wheel trigger and the global shortcuts |
+| **Input Monitoring** | For the Fn key and the global shortcuts |
 | **Accessibility** | To paste into other apps, and to read selected text for Command Mode |
 
 Without Input Monitoring the triggers silently do nothing — the Status tab in the app window
 tells you exactly which grant is missing and opens the right settings pane.
 
-If a trigger still misbehaves, set `trigger.debug_log` to `true` in `config.json` and relaunch:
-every middle click and the decision made about it is written to
-`~/Library/Logs/LocalFlow-trigger.log`.
+
 
 ## Using it
 
@@ -102,21 +102,28 @@ every middle click and the decision made about it is written to
 |---|---|
 | **Hold the trigger key** | Records while held, transcribes on release |
 | **Double-tap it** | Hands-free — keeps listening until you tap again |
-| **Hold the mouse wheel** | Records while held, transcribes on release |
-| **Double-click the mouse wheel** | Hands-free; one click finishes |
+| **F18**, or `notifyutil -p com.localflow.toggle` | Start / finish a hands-free dictation (Stream Deck) |
+| `notifyutil -p com.localflow.stop` | Abandon whatever is in flight |
 | **⌘⌥J** | Command Mode |
 | **⌘⌥S** | Scratchpad |
 | **⌘⌥V / ⌘⌥C** | Paste / copy the last dictation |
 
-A lone middle click still reaches the app underneath (~0.35 s later), so middle-click keeps
-opening and closing browser tabs. Only the clicks that start and stop a dictation are swallowed.
+**Settings → Trigger** picks the hold key (Fn, either Option, right Command, right Control or
+F13–F15) and tunes the hold threshold and double-tap window. Trigger changes need a relaunch —
+there's a button for it.
 
-The wheel and the hold key share the same three gestures: hold to talk, double to lock, and a
-plain quick click is left alone for the app underneath.
+### Stream Deck
+Add a **System → Open** action pointing at a one-line script:
 
-Both triggers are configurable in **Settings → Trigger**: pick the hold key (Fn, either Option,
-right Command, right Control, F13–F15, or none), turn the wheel trigger on or off, and tune the
-hold threshold and double-tap window. Trigger changes need a relaunch — there's a button for it.
+```sh
+#!/bin/sh
+exec /usr/bin/notifyutil -p com.localflow.toggle
+```
+
+Press once to start listening, again to transcribe. It's a Darwin notification, so it needs no
+Accessibility or Automation grant. (The Stream Deck *Hotkey* action won't work with most apps
+that use pynput: pynput's `GlobalHotKeys` silently drops injected keystrokes. LocalFlow uses its
+own listener that doesn't, so F18 from a remapper does work.)
 
 ## Configuration
 
@@ -156,6 +163,9 @@ Things that keep it light:
   A token-level loop guard backs it up, and a word now counts once per dictation towards the
   learned dictionary, so a single looped transcript can't teach it junk.
 - **The LLM is skipped** when a transcript is short, filler-free and already punctuated.
+- **All UI on the main thread.** AppKit writes from background threads (menu titles, the
+  status icon) could deadlock the app's view lock — it froze with the menu gone. Every rumps
+  setter now routes through the main thread (`mainthread.py`).
 - **No subprocesses on the hot path**: the pasteboard, the ⌘V keystroke, the frontmost-app
   lookup, the cues and the music check all use native APIs (the frontmost-app lookup alone went
   from ~430 ms of AppleScript to ~2 ms).

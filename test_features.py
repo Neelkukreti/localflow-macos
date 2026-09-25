@@ -168,8 +168,8 @@ try:
 finally:
     rec_mod.sd = real_sd
 
-# ---- trigger resolution: the wheel and the hold key are independent, and an
-# older config (key / keep_fn) must still resolve to the same behaviour.
+# ---- trigger resolution: a hold key only. The mouse-wheel trigger was removed
+# (it swallowed middle clicks meant for other apps); old configs must land on Fn.
 try:
     import app as _app
 except Exception as e:                      # pragma: no cover
@@ -178,14 +178,13 @@ else:
     class _Cfg(_app.LocalFlowApp):
         def __init__(self, cfg): self.cfg = cfg
     for trig, want in [
-        ({"wheel": True, "hold_key": "fn"}, (True, "fn")),
-        ({"wheel": False, "hold_key": "alt_r"}, (False, "alt_r")),
-        ({"wheel": True, "hold_key": "none"}, (True, "none")),
-        ({"key": "mouse_middle", "keep_fn": True}, (True, "fn")),
-        ({"key": "mouse_middle", "keep_fn": False}, (True, "none")),
-        ({"key": "fn"}, (False, "fn")),
-        ({"key": "alt_r"}, (False, "alt_r")),
-        ({}, (True, "fn")),
+        ({"hold_key": "fn"}, "fn"),
+        ({"hold_key": "alt_r"}, "alt_r"),
+        ({"hold_key": "none"}, "fn"),                    # "none" is gone: never leave no trigger
+        ({"key": "mouse_middle", "keep_fn": True}, "fn"),  # the retired wheel config
+        ({"key": "mouse_middle", "keep_fn": False}, "fn"),
+        ({"key": "alt_r"}, "alt_r"),                     # older single-key config
+        ({}, "fn"),
     ]:
         check(f"trigger {trig or 'defaults'}", _Cfg({"trigger": trig})._trigger_setup(), want)
 

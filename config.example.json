@@ -1,20 +1,14 @@
 {
   "trigger": {
     "mode": "hold",
-    "key": "mouse_middle",
     "toggle_combo": [
       "cmd",
       "shift",
       "space"
     ],
-    "keep_fn": true,
-    "double_click_seconds": 0.35,
-    "pass_through_clicks": true,
     "hold_min_seconds": 0.35,
     "double_tap_seconds": 0.35,
-    "wheel": true,
-    "hold_key": "fn",
-    "debug_log": false
+    "hold_key": "fn"
   },
   "whisper": {
     "model": "mlx-community/whisper-large-v3-turbo",
@@ -71,7 +65,8 @@
     "paste_last": "<cmd>+<alt>+v",
     "copy_last": "<cmd>+<alt>+c",
     "command_mode": "<cmd>+<alt>+j",
-    "scratchpad": "<cmd>+<alt>+s"
+    "scratchpad": "<cmd>+<alt>+s",
+    "toggle_dictation": "<f18>"
   },
   "voices": {
     "work": {

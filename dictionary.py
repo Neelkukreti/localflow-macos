@@ -7,7 +7,7 @@ Two halves, both local, both in dictionary.json next to the app:
   noticing which uncommon words you keep saying. Anything it learns on its own
   is flagged until you look at it, so the menu can ask "keep these?".
 * **Fixes** — literal replacements applied to the finished text, for the times
-  Whisper reliably mishears something ("bit unix" → "Bitunix").
+  Whisper reliably mishears something ("super base" → "Supabase").
 """
 
 import json
@@ -23,7 +23,7 @@ WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’]*(?:-[A-Za-z0-9'’]+)*")
 SENTENCE_END = ".!?…\n"
 
 # macOS ships a word list; anything in it is ordinary English that Whisper
-# already knows, so only shouted (BTC), CamelCase (CryptoJargon) or
+# already knows, so only shouted (BTC), CamelCase (OpenSearch) or
 # capitalised-mid-sentence (…the Radar bot) forms of those are worth learning.
 SYSTEM_WORDS_PATH = "/usr/share/dict/words"
 _system_words = None
@@ -179,7 +179,7 @@ class Dictionary:
         if _key(token) in STOPWORDS or not any(c.isalpha() for c in token) or len(token) < 2:
             return False
         shouted = token.isupper()                          # BTC, CJ
-        camel = token[1:] != token[1:].lower()             # CryptoJargon, MacBook
+        camel = token[1:] != token[1:].lower()             # OpenSearch, MacBook
         named = token[:1].isupper() and not sentence_initial   # …the Radar bot
         if is_ordinary(token):
             return shouted or camel or named
