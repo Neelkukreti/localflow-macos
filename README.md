@@ -102,7 +102,8 @@ tells you exactly which grant is missing and opens the right settings pane.
 |---|---|
 | **Hold the trigger key** | Records while held, transcribes on release |
 | **Double-tap it** | Hands-free — keeps listening until you tap again |
-| **F18**, or `notifyutil -p com.localflow.toggle` | Start / finish a hands-free dictation (Stream Deck) |
+| **Hold the Stream Deck key** | Records while held, transcribes on release |
+| **F18**, or `notifyutil -p com.localflow.toggle` | Start / finish a hands-free dictation |
 | `notifyutil -p com.localflow.stop` | Abandon whatever is in flight |
 | **⌘⌥J** | Command Mode |
 | **⌘⌥S** | Scratchpad |
@@ -112,18 +113,18 @@ tells you exactly which grant is missing and opens the right settings pane.
 F13–F15) and tunes the hold threshold and double-tap window. Trigger changes need a relaunch —
 there's a button for it.
 
-### Stream Deck
-Add a **System → Open** action pointing at a one-line script:
+### Stream Deck — hold to talk
+A small plugin ships in `streamdeck/`. Install it, then drag **LocalFlow → Hold to talk** onto a key:
 
-```sh
-#!/bin/sh
-exec /usr/bin/notifyutil -p com.localflow.toggle
+```bash
+./streamdeck/install.sh
 ```
 
-Press once to start listening, again to transcribe. It's a Darwin notification, so it needs no
-Accessibility or Automation grant. (The Stream Deck *Hotkey* action won't work with most apps
-that use pynput: pynput's `GlobalHotKeys` silently drops injected keystrokes. LocalFlow uses its
-own listener that doesn't, so F18 from a remapper does work.)
+Hold the key and talk; let go and it transcribes. The plugin turns the key's press and release
+into `notifyutil -p com.localflow.start` / `com.localflow.finish` — Darwin notifications, so it
+needs no Accessibility or Automation grant. (The built-in Open and Hotkey actions only fire once
+per press, so they can't do hold-to-talk; and pynput's `GlobalHotKeys` drops injected keystrokes
+anyway.) `com.localflow.toggle` and `com.localflow.stop` are there for scripts too.
 
 ## Configuration
 
@@ -212,7 +213,8 @@ LocalFlow bundles nothing and copies no one's code. It depends on
 [sounddevice](https://github.com/spatialaudio/python-sounddevice) (MIT),
 [NumPy](https://numpy.org) (BSD),
 [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT),
-[PyObjC](https://pyobjc.readthedocs.io) (MIT) and
+[PyObjC](https://pyobjc.readthedocs.io) (MIT),
+[ws](https://github.com/websockets/ws) (MIT, vendored in the Stream Deck plugin) and
 [py2app](https://github.com/ronaldoussoren/py2app) (MIT).
 Each keeps its own licence; pynput is LGPL-3.0 and is used unmodified as a normal import, so you
 are free to replace it.

@@ -303,7 +303,8 @@ class LocalFlowApp(rumps.App):
         self._start_listener()
         self._start_shortcuts()
         # Stream Deck / scripts: `notifyutil -p com.localflow.toggle` (see remote.py)
-        Remote({"toggle": self._hk_toggle_dictation, "stop": self.force_idle}).start()
+        Remote({"toggle": self._hk_toggle_dictation, "stop": self.force_idle,
+                "start": self._remote_start, "finish": self._remote_finish}).start()
         self._warn_if_ollama_down()
         self._preload_models()
         _install_reopen_hook()
@@ -437,6 +438,20 @@ class LocalFlowApp(rumps.App):
         self.hands_free = True
         self._set_state(HANDS_FREE)
         self.status_item.title = "Listening… (press again to finish)"
+
+    def _remote_start(self):
+        """Push-to-talk from outside (the Stream Deck key going down)."""
+        if self.busy or self.is_recording:
+            return
+        self.mode = "dictate"
+        self.hands_free = False
+        self.start_recording()
+
+    def _remote_finish(self):
+        """...and coming back up: transcribe what was said while it was held."""
+        if self.is_recording:
+            self._cancel_fn_tap_timer()
+            self.stop_and_process()
 
     def _hk_command_mode(self):
         """Press once to start listening for an instruction, again to run it."""
@@ -1042,7 +1057,7 @@ class LocalFlowApp(rumps.App):
     def add_word(self, _):
         resp = rumps.Window(
             title="Add to dictionary",
-            message="Names or terms LocalFlow should spell your way (comma-separated), e.g. Anthropic, Vercel",
+            message="Names or terms LocalFlow should spell your way (comma-separated), e.g. Yugandhar, Vercel",
             default_text="", ok="Add", cancel="Cancel", dimensions=(320, 24),
         ).run()
         words = [w.strip() for w in resp.text.split(",") if w.strip()] if resp.clicked else []
@@ -1055,7 +1070,7 @@ class LocalFlowApp(rumps.App):
     def add_fix(self, _):
         resp = rumps.Window(
             title="Fix a misheard word",
-            message="What you hear back = what it should say, e.g.   super base = Supabase",
+            message="What you hear back = what it should say, e.g.   bit unix = Bitunix",
             default_text="", ok="Save", cancel="Cancel", dimensions=(320, 24),
         ).run()
         if not resp.clicked or "=" not in resp.text:

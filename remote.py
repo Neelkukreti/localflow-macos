@@ -1,5 +1,7 @@
 """Remote control over Darwin notifications — for the Stream Deck, or anything.
 
+    notifyutil -p com.localflow.start      begin recording (push-to-talk key down)
+    notifyutil -p com.localflow.finish     transcribe it       (push-to-talk key up)
     notifyutil -p com.localflow.toggle     start / finish a hands-free dictation
     notifyutil -p com.localflow.stop       abandon whatever is in flight
 

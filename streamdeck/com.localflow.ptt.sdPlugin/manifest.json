@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "LocalFlow",
+  "Version": "1.0.0.0",
+  "Author": "LocalFlow",
+  "Description": "Hold a key to dictate with LocalFlow; release it to transcribe.",
+  "Icon": "imgs/plugin",
+  "Category": "LocalFlow",
+  "CategoryIcon": "imgs/plugin",
+  "CodePath": "bin/plugin.js",
+  "Nodejs": { "Version": "20", "Debug": "disabled" },
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.4" },
+  "OS": [{ "Platform": "mac", "MinimumVersion": "12" }],
+  "UUID": "com.localflow.ptt",
+  "Actions": [
+    {
+      "Name": "Hold to talk",
+      "UUID": "com.localflow.ptt.hold",
+      "Icon": "imgs/action",
+      "Tooltip": "Hold to dictate, release to transcribe",
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false,
+      "States": [{ "Image": "imgs/key" }]
+    }
+  ]
+}
