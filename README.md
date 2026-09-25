@@ -148,10 +148,13 @@ Measured on an Apple Silicon Mac, `whisper-large-v3-turbo`, `llama3.2:3b`:
 
 Things that keep it light:
 
-- **Whisper decoding is pinned** to one pass (`temperature=0`) with no self-conditioning. Its
-  default temperature fallback silently re-decodes the same audio up to six times when the
-  output looks poor — on a quiet or noisy clip that took one test from **5.5 s to 113 s**, which
-  is what "the app hangs" feels like. On clean speech the change is neutral.
+- **Whisper's retry is bounded, not removed.** Its temperature fallback re-decodes the same
+  audio at rising temperatures when the output looks poor — up to six passes by default, which
+  took one noisy clip to **113 s** and is what "the app hangs" feels like. It's capped at three.
+  Removing it outright is a trap: that fallback is also the only thing that rescues a
+  repetition loop, and without it every dictation came back as `The The The The…`.
+  A token-level loop guard backs it up, and a word now counts once per dictation towards the
+  learned dictionary, so a single looped transcript can't teach it junk.
 - **The LLM is skipped** when a transcript is short, filler-free and already punctuated.
 - **No subprocesses on the hot path**: the pasteboard, the ⌘V keystroke, the frontmost-app
   lookup, the cues and the music check all use native APIs (the frontmost-app lookup alone went

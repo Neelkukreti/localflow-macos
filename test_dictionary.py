@@ -91,7 +91,13 @@ for _ in range(3):
     d.learn("Netlify funding Netlify")
 again = Dictionary(path=d.path, promote_at=3)
 check("reloaded from disk", again.prompt_words(), ["Netlify"])
-check("counts kept", [e["count"] for k, e in again.listing() if k == "netlify"], [6])
+# "Netlify funding Netlify" says it twice, but a word counts once per dictation:
+# three dictations is 3, not 6. Occurrence counting let a single looped
+# transcript learn a junk word on its own.
+check("counts kept, once per dictation", [e["count"] for k, e in again.listing() if k == "netlify"], [3])
+loop = fresh()
+loop.learn(" ".join(["Smithson"] * 111))
+check("a looped transcript can't learn a word by itself", loop.prompt_words(), [])
 
 print("\n" + ("ALL PASS" if not fails else f"FAILURES: {fails}"))
 raise SystemExit(1 if fails else 0)

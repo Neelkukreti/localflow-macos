@@ -120,6 +120,32 @@ check("dictionary casing leaves correct text untouched",
 check("dictionary casing respects word boundaries",
       d_case.apply_casing("supabased"), "supabased")
 
+# ---- Whisper repetition loops (regression: 25 Sep, every dictation looped)
+import transcribe
+fallback = transcribe.DECODE_DEFAULTS.get("temperature")
+check("decoder keeps a temperature fallback (never a single pinned value)",
+      isinstance(fallback, (tuple, list)) and len(fallback) > 1, True)
+check("the fallback is bounded so it can't hang for minutes",
+      len(fallback) <= 3, True)
+check("repetition-loop detection is on",
+      transcribe.DECODE_DEFAULTS.get("compression_ratio_threshold") is not None, True)
+for src, want in [
+    ("Smithson Smithson Smithson Smithson Smithson Smithson Smithson", "Smithson"),
+    ("Energetic The The The The The The The The The The", "Energetic The"),
+    ("The first time you have X. The first time you have X. The first time you have X. "
+     "The first time you have X.", "The first time you have X."),
+    ("So I think we should push the launch to Friday.", "So I think we should push the launch to Friday."),
+    ("no no no", "no no no"),                                      # real emphasis survives
+    ("Make B-rolls. Make B-rolls. More.", "Make B-rolls. Make B-rolls. More."),
+    ("Combine both studies.\n\nAnd then tell me.", "Combine both studies.\n\nAnd then tell me."),
+]:
+    check(f"collapse {src[:26]!r}", transcribe._collapse_loops(src), want)
+check("loop detected", transcribe.looks_like_loop("The The The The The The The The"), True)
+check("normal sentence isn't a loop",
+      transcribe.looks_like_loop("So I think we should push the launch to Friday."), False)
+check("punctuation-only output is dropped", transcribe._only_if_words("!"), "")
+check("real short output is kept", transcribe._only_if_words("Hi!"), "Hi!")
+
 # ---- microphone fallback order (no PortAudio needed)
 import recorder as rec_mod
 

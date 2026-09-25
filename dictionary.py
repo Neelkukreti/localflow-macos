@@ -7,7 +7,7 @@ Two halves, both local, both in dictionary.json next to the app:
   noticing which uncommon words you keep saying. Anything it learns on its own
   is flagged until you look at it, so the menu can ask "keep these?".
 * **Fixes** — literal replacements applied to the finished text, for the times
-  Whisper reliably mishears something ("super base" → "Supabase").
+  Whisper reliably mishears something ("bit unix" → "Bitunix").
 """
 
 import json
@@ -23,7 +23,7 @@ WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’]*(?:-[A-Za-z0-9'’]+)*")
 SENTENCE_END = ".!?…\n"
 
 # macOS ships a word list; anything in it is ordinary English that Whisper
-# already knows, so only shouted (BTC), CamelCase (OpenSearch) or
+# already knows, so only shouted (BTC), CamelCase (CryptoJargon) or
 # capitalised-mid-sentence (…the Radar bot) forms of those are worth learning.
 SYSTEM_WORDS_PATH = "/usr/share/dict/words"
 _system_words = None
@@ -179,7 +179,7 @@ class Dictionary:
         if _key(token) in STOPWORDS or not any(c.isalpha() for c in token) or len(token) < 2:
             return False
         shouted = token.isupper()                          # BTC, CJ
-        camel = token[1:] != token[1:].lower()             # OpenSearch, MacBook
+        camel = token[1:] != token[1:].lower()             # CryptoJargon, MacBook
         named = token[:1].isupper() and not sentence_initial   # …the Radar bot
         if is_ordinary(token):
             return shouted or camel or named
@@ -193,11 +193,18 @@ class Dictionary:
         promoted = []
         with self._lock:
             text = text or ""
+            # A word counts once per dictation, however often it appears in it.
+            # "Said 3+ times" means across three dictations; counting occurrences
+            # let one looped transcript ("Smithson" x111) learn junk outright.
+            seen = set()
             for m in WORD_RE.finditer(text):
                 token = m.group(0)
                 if not self._candidate(token, _sentence_initial(text, m.start())):
                     continue
                 k = _key(token)
+                if k in seen:
+                    continue
+                seen.add(k)
                 e = self.words.get(k)
                 if e is None:
                     e = self.words[k] = {

@@ -23,7 +23,12 @@
     "romanize": true,
     "preload": true,
     "decode": {
-      "temperature": 0.0,
+      "temperature": [
+        0.0,
+        0.2,
+        0.4
+      ],
+      "compression_ratio_threshold": 2.4,
       "condition_on_previous_text": false
     }
   },
