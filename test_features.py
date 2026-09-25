@@ -146,6 +146,33 @@ check("normal sentence isn't a loop",
 check("punctuation-only output is dropped", transcribe._only_if_words("!"), "")
 check("real short output is kept", transcribe._only_if_words("Hi!"), "Hi!")
 
+# ---- missed-release watchdog: a hold whose key-up never arrived still ends
+import time as _time, threading as _threading
+from hold_grammar import HoldGrammar
+try:
+    import app as _app_mod
+    class _W:                                   # just enough of the app for the watchdog
+        _watch_hold_key = _app_mod.LocalFlowApp._watch_hold_key
+    w = _W(); w.is_recording = False; w._key_watch = None; w.finished = []
+    def _start(): w.is_recording = True
+    def _finish(): w.is_recording = False; w.finished.append(1)
+    w.hold = HoldGrammar(_start, _finish, lambda: None, lambda: w.is_recording, lambda: False)
+    w._hold_key_physically_down = lambda: False   # the key is up; the event was lost
+    w.hold.down()                                  # press seen...
+    w._watch_hold_key()                            # ...release never delivered
+    _time.sleep(0.6)
+    check("watchdog ends a hold whose release was lost", (w.is_recording, len(w.finished)), (False, 1))
+    w2 = _W(); w2.is_recording = False; w2._key_watch = None; w2.finished = []
+    w2.hold = HoldGrammar(lambda: setattr(w2, "is_recording", True),
+                          lambda: (setattr(w2, "is_recording", False), w2.finished.append(1)),
+                          lambda: None, lambda: w2.is_recording, lambda: False)
+    w2._hold_key_physically_down = lambda: True    # genuinely still held
+    w2.hold.down(); w2._watch_hold_key(); _time.sleep(0.6)
+    check("watchdog leaves a genuine hold alone", w2.is_recording, True)
+    w2.hold.up()
+except ImportError as e:
+    print(f"SKIP watchdog test ({e})")
+
 # ---- microphone fallback order (no PortAudio needed)
 import recorder as rec_mod
 

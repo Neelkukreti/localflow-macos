@@ -19,6 +19,7 @@ import threading
 import subprocess
 
 import numpy as np
+import Quartz
 import rumps
 import mainthread
 mainthread.install()   # before anything builds a menu — see mainthread.py
@@ -42,6 +43,7 @@ from snippets import Snippets
 from scratchpad import Scratchpad
 from hub import Hub
 from remote import Remote
+from hold_grammar import HoldGrammar
 from flowbar import FlowBar
 from fn_key import FnListener
 
@@ -97,6 +99,10 @@ HOLD_KEYS = {
     "f14": "F14",
     "f15": "F15",
 }
+
+# Virtual keycodes for the physical-state check in _hold_key_physically_down().
+HOLD_KEYCODES = {"alt_r": 61, "alt_l": 58, "cmd_r": 54, "ctrl_r": 62,
+                 "f13": 105, "f14": 107, "f15": 113}
 
 DEFAULT_SHORTCUTS = {
     "paste_last": "<cmd>+<alt>+v",
@@ -243,8 +249,15 @@ class LocalFlowApp(rumps.App):
         self._meter_stop = None
         self._bar_drag_timer = None
         self._job = 0        # bumped per dictation; a stale job's result is dropped
-        self._fn_down_at = 0.0
-        self._fn_tap_timer = None
+        trig = self.cfg.get("trigger", {})
+        self.hold = HoldGrammar(
+            on_start=self._hold_start, on_finish=self.stop_and_process,
+            on_lock=self._hold_lock,
+            is_recording=lambda: self.is_recording, is_busy=lambda: self.busy,
+            hold_seconds=trig.get("hold_min_seconds", 0.35),
+            double_seconds=trig.get("double_tap_seconds", 0.35),
+        )
+        self._key_watch = None
         self._watchdog = None
         self.last_text = ""
         self.history = History()
@@ -475,59 +488,72 @@ class LocalFlowApp(rumps.App):
         if key == self.hold_key:
             self._on_hold_up()
 
-    # The hold key has three gestures, matching Wispr Flow:
-    #   hold                -> talk while held, stops on release
-    #   tap, tap            -> hands free, keeps listening until the next tap
-    #   tap (while locked)  -> finish
-    def _fn_windows(self):
-        trig = self.cfg.get("trigger", {})
-        return (trig.get("hold_min_seconds", 0.35), trig.get("double_tap_seconds", 0.35))
+    # ---------- the hold key (Fn or a key you pick) ----------
+    # Gestures live in hold_grammar.py: hold to talk, double-tap to lock
+    # hands-free, and tap-then-hold is a hold (not a lock). These methods are
+    # just its inputs and outputs.
 
     def _cancel_fn_tap_timer(self):
-        if self._fn_tap_timer is not None:
-            self._fn_tap_timer.cancel()
-            self._fn_tap_timer = None
+        """Something else ended or took over the dictation; forget the gesture."""
+        self.hold.reset()
 
     def _on_hold_down(self):
-        if self.busy:
-            return
-        if self.is_recording and self.hands_free:
-            self._cancel_fn_tap_timer()
-            self.stop_and_process()      # locked: this tap ends it
-            return
-        if self.is_recording and self._fn_tap_timer is not None:
-            # Second tap inside the window: lock hands-free instead of stopping.
-            self._cancel_fn_tap_timer()
-            self.hands_free = True
-            self._set_state(HANDS_FREE)
-            self.status_item.title = "Listening… (tap again to finish)"
-            return
-        if not self.is_recording:
-            self._fn_down_at = time.time()
-            self.start_recording()
+        self.hold.down()
+        if self.hold.held and self.is_recording and not self.hold.locked:
+            self._watch_hold_key()
 
     def _on_hold_up(self):
-        if not self.is_recording or self.hands_free:
-            return
-        hold_min, double_window = self._fn_windows()
-        if time.time() - self._fn_down_at >= hold_min:
-            self.stop_and_process()      # a genuine hold
-            return
+        self.hold.up()
 
-        # A short tap: wait to see whether a second one turns it hands-free.
-        def settle():
-            self._fn_tap_timer = None
-            if self.is_recording and not self.hands_free:
-                self.stop_and_process()
-        self._cancel_fn_tap_timer()
-        self._fn_tap_timer = threading.Timer(double_window, settle)
-        self._fn_tap_timer.daemon = True
-        self._fn_tap_timer.start()
+    def _hold_start(self):
+        self.mode = "dictate"
+        self.hands_free = False
+        self.start_recording()
+
+    def _hold_lock(self):
+        self.hands_free = True
+        self._set_state(HANDS_FREE)
+        self.status_item.title = "Listening… (tap again to finish)"
 
     def _on_hold_combo(self):
         if self.is_recording:
-            self._cancel_fn_tap_timer()
+            self.hold.reset()
             self.cancel_recording()  # a shortcut like Fn+Delete, not dictation
+
+    def _hold_key_physically_down(self):
+        """Ask the keyboard itself, not the event stream, whether the key is down."""
+        try:
+            src = Quartz.kCGEventSourceStateHIDSystemState
+            key = self._trigger_setup()
+            if key == "fn":
+                return bool(Quartz.CGEventSourceFlagsState(src) & Quartz.kCGEventFlagMaskSecondaryFn)
+            code = HOLD_KEYCODES.get(key)
+            return True if code is None else bool(Quartz.CGEventSourceKeyState(src, code))
+        except Exception:
+            return True                    # can't tell: never cut a dictation short
+
+    def _watch_hold_key(self):
+        """Backstop for a release the tap never delivered.
+
+        If the key's up event is lost (a secure-input field grabbed the
+        keyboard, a modifier changed at the same instant), LocalFlow would
+        think the key is still held and listen forever. While a hold is in
+        progress, check the physical key ~8x a second; two "up" readings in a
+        row and we deliver the release ourselves. Idle, this costs nothing.
+        """
+        if self._key_watch is not None and self._key_watch.is_alive():
+            return
+
+        def watch():
+            ups = 0
+            while self.hold.held and self.is_recording:
+                time.sleep(0.12)
+                ups = 0 if self._hold_key_physically_down() else ups + 1
+                if ups >= 2 and self.hold.held:
+                    self.hold.up()
+                    break
+        self._key_watch = threading.Thread(target=watch, daemon=True, name="hold-key-watch")
+        self._key_watch.start()
 
     def _combo_satisfied(self):
         for name in self.combo:
@@ -1070,7 +1096,7 @@ class LocalFlowApp(rumps.App):
     def add_fix(self, _):
         resp = rumps.Window(
             title="Fix a misheard word",
-            message="What you hear back = what it should say, e.g.   bit unix = Bitunix",
+            message="What you hear back = what it should say, e.g.   bit unix = Supabase",
             default_text="", ok="Save", cancel="Cancel", dimensions=(320, 24),
         ).run()
         if not resp.clicked or "=" not in resp.text:

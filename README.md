@@ -102,6 +102,7 @@ tells you exactly which grant is missing and opens the right settings pane.
 |---|---|
 | **Hold the trigger key** | Records while held, transcribes on release |
 | **Double-tap it** | Hands-free — keeps listening until you tap again |
+| **Tap, then hold** | Just a hold: releasing finishes (a false-start tap never locks you in) |
 | **Hold the Stream Deck key** | Records while held, transcribes on release |
 | **F18**, or `notifyutil -p com.localflow.toggle` | Start / finish a hands-free dictation |
 | `notifyutil -p com.localflow.stop` | Abandon whatever is in flight |
@@ -233,6 +234,7 @@ Issues and PRs welcome. Please run the tests first — they're headless and need
 ./.venv/bin/python test_click.py
 ./.venv/bin/python test_dictionary.py
 ./.venv/bin/python test_features.py
+./.venv/bin/python test_hold.py
 ```
 
 ---
