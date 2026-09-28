@@ -176,7 +176,8 @@ Things that keep it light:
 - A **watchdog** abandons a transcription that runs past `transcribe_timeout` (90 s).
 
 To go lighter still, set `whisper.model` to a smaller MLX Whisper, `cleanup.enabled` to `false`,
-or a shorter `cleanup.keep_alive` so Ollama releases its model sooner (it reloads in ~3 s).
+or a shorter `cleanup.keep_alive` so Ollama releases its model sooner (it reloads in ~3 s, and LocalFlow starts that reload the moment you start
+talking, so it's usually ready by the time you stop).
 
 ## FAQ
 

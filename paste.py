@@ -9,6 +9,7 @@ Accessibility grant is missing, since that path reports its own error.
 
 import os
 import subprocess
+import threading
 import time
 
 # pbcopy/pbpaste mangle non-ASCII text without a UTF-8 locale (launchd/Bash have none).
@@ -107,6 +108,6 @@ def insert(text: str, cfg: dict, press_enter: bool = False):
             time.sleep(0.15)
             _press_return()
         if prev is not None:
-            # Give the paste a beat to consume the clipboard before restoring.
-            time.sleep(0.4)
-            _write_clipboard(prev)
+            # Give the paste a beat to consume the clipboard before restoring — on a timer, so the dictation finishes
+            # now rather than 0.4 s later. A next dictation can't paste inside 0.4 s (transcription alone takes longer).
+            threading.Timer(0.4, _write_clipboard, (prev,)).start()

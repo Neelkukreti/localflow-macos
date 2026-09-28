@@ -9,6 +9,7 @@ import re
 import json
 import urllib.request
 import urllib.error
+import time
 
 SYSTEM_PROMPT = (
     "You are a dictation transcript editor, NOT an assistant. The user message is "
@@ -198,6 +199,32 @@ def _ollama_generate(text: str, model: str, url: str, timeout: float = 30.0,
 
 WORD = re.compile(r"[a-z0-9']+")
 SPOKEN = {"period", "comma", "question", "mark", "new", "paragraph", "line", "exclamation", "point"}
+
+
+_warmed_at = 0.0
+
+
+def warm(cfg: dict) -> None:
+    """Load the cleanup model while the user is still talking.
+
+    Ollama unloads the model after `keep_alive` idle minutes, and reloading it costs ~3.5 s on the first long dictation
+    after a pause. A generate request with no prompt only loads the model, so firing it when recording starts hides the
+    load behind the speech. Fire-and-forget: at most once a minute, and it never raises.
+    """
+    global _warmed_at
+    if not cfg.get("enabled", True) or (cfg.get("level") or DEFAULT_LEVEL).lower() == "off":
+        return
+    now = time.monotonic()
+    if now - _warmed_at < 60:
+        return
+    _warmed_at = now
+    body = json.dumps({"model": cfg.get("model", "llama3.2:3b"), "keep_alive": cfg.get("keep_alive", "10m")}).encode()
+    url = f"{cfg.get('ollama_url', 'http://localhost:11434').rstrip('/')}/api/generate"
+    try:
+        urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}),
+                               timeout=15).read()
+    except Exception:
+        pass
 
 
 def looks_like_cleanup(raw: str, out: str, novel_max: float = 0.25,

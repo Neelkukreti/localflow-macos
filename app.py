@@ -588,6 +588,9 @@ class LocalFlowApp(rumps.App):
         self.status_item.title = "Recording… (release to transcribe)"
         self._cue("start")
         self.recorder.start()
+        if self.mode == "dictate":
+            # load the cleanup model while the user talks, not after (cleanup.warm)
+            threading.Thread(target=cleanup.warm, args=(self.cfg.get("cleanup", {}),), daemon=True).start()
         if self.recorder.fell_back:
             rumps.notification(
                 "LocalFlow", f"{self.recorder.device} isn't plugged in",
