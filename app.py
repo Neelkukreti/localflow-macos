@@ -589,7 +589,7 @@ class LocalFlowApp(rumps.App):
         self._cue("start")
         self.recorder.start()
         if self.mode == "dictate":
-            # load the cleanup model while the user talks, not after (cleanup.warm)
+            # load the cleanup model while he talks, not after (cleanup.warm)
             threading.Thread(target=cleanup.warm, args=(self.cfg.get("cleanup", {}),), daemon=True).start()
         if self.recorder.fell_back:
             rumps.notification(
@@ -612,11 +612,18 @@ class LocalFlowApp(rumps.App):
         self._clear_watchdog()
         self._clear_timers()
         self._stop_meter()
-        if self.is_recording:
-            try:
-                self.recorder.stop()
-            except Exception:
-                pass
+        # Close the mic even if we don't think it's open — a stream opened on a
+        # glitchy path must not outlive a reset.
+        try:
+            self.recorder.stop()
+        except Exception:
+            pass
+        # Forget every piece of trigger state, or the next Fn press is swallowed:
+        # the gesture machine and the Fn tap both remember "the key is down".
+        self.hold.reset()
+        self.hold.held = False
+        if getattr(self, "_fn_listener", None) is not None:
+            self._fn_listener.fn_down = False
         self.is_recording = False
         self.hands_free = False
         self.mode = "dictate"
@@ -775,6 +782,8 @@ class LocalFlowApp(rumps.App):
                 return  # < 0.3s — ignore accidental taps
             if np.abs(audio).max() < 0.003:
                 mic = self.recorder.active_device or "the selected mic"
+                if job is not None and job != self._job:
+                    return
                 self.status_item.title = f"Heard silence on {mic}"
                 rumps.notification("LocalFlow", "Heard silence",
                                    f"{mic} recorded nothing — pick another in Microphone.")
@@ -800,6 +809,8 @@ class LocalFlowApp(rumps.App):
 
             voice_name, voice = voices.resolve(app_name, self.cfg)
             self.voice_item.title = f"Voice: {voice_name} ({app_name or 'unknown app'})"
+            if job is not None and job != self._job:
+                return  # stopped while Whisper ran
             self.status_item.title = "Cleaning up…"
             final = cleanup.clean(raw, self.cfg["cleanup"],
                                   level=voice.get("level"), style=voice.get("style"))
@@ -822,6 +833,8 @@ class LocalFlowApp(rumps.App):
             self._deliver(final, voice)
             self.hub.refresh()
         except Exception as e:  # keep the app alive no matter what
+            if job is not None and job != self._job:
+                return
             self.status_item.title = f"Error: {e}"
             rumps.notification("LocalFlow", "Error", str(e))
         finally:
@@ -829,7 +842,8 @@ class LocalFlowApp(rumps.App):
                 self._clear_watchdog()
                 self.busy = False
                 self._set_state(IDLE)
-            if not self.status_item.title.startswith(("Error", "Heard silence")):
+            if (job is None or job == self._job) and \
+                    not self.status_item.title.startswith(("Error", "Heard silence")):
                 self.status_item.title = "Idle"
 
     def _deliver(self, text, voice):
@@ -1099,7 +1113,7 @@ class LocalFlowApp(rumps.App):
     def add_fix(self, _):
         resp = rumps.Window(
             title="Fix a misheard word",
-            message="What you hear back = what it should say, e.g.   bit unix = Supabase",
+            message="What you hear back = what it should say, e.g.   bit unix = Bitunix",
             default_text="", ok="Save", cancel="Cancel", dimensions=(320, 24),
         ).run()
         if not resp.clicked or "=" not in resp.text:
