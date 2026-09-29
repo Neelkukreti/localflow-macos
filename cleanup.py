@@ -205,11 +205,12 @@ _warmed_at = 0.0
 
 
 def warm(cfg: dict) -> None:
-    """Load the cleanup model while the user is still talking.
+    """Load the cleanup model while the user is still talking (28 Sep 2026).
 
-    Ollama unloads the model after `keep_alive` idle minutes, and reloading it costs ~3.5 s on the first long dictation
-    after a pause. A generate request with no prompt only loads the model, so firing it when recording starts hides the
-    load behind the speech. Fire-and-forget: at most once a minute, and it never raises.
+    Ollama drops the model after keep_alive idle minutes, and the reload cost ~3.5 s on the first long dictation after
+    a pause (13 of 113 long dictations in history.jsonl). A generate request with no prompt only loads the model, so
+    firing it when recording starts hides the load behind the speech. Fire-and-forget: at most once a minute, and it
+    never raises.
     """
     global _warmed_at
     if not cfg.get("enabled", True) or (cfg.get("level") or DEFAULT_LEVEL).lower() == "off":

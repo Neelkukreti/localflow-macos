@@ -1250,7 +1250,7 @@ class LocalFlowApp(rumps.App):
     def add_word(self, _):
         resp = rumps.Window(
             title="Add to dictionary",
-            message="Names or terms LocalFlow should spell your way (comma-separated), e.g. Yugandhar, Vercel",
+            message="Names or terms LocalFlow should spell your way (comma-separated), e.g. Anthropic, Vercel",
             default_text="", ok="Add", cancel="Cancel", dimensions=(320, 24),
         ).run()
         words = [w.strip() for w in resp.text.split(",") if w.strip()] if resp.clicked else []
@@ -1263,7 +1263,7 @@ class LocalFlowApp(rumps.App):
     def add_fix(self, _):
         resp = rumps.Window(
             title="Fix a misheard word",
-            message="What you hear back = what it should say, e.g.   bit unix = Bitunix",
+            message="What you hear back = what it should say, e.g.   super base = Supabase",
             default_text="", ok="Save", cancel="Cancel", dimensions=(320, 24),
         ).run()
         if not resp.clicked or "=" not in resp.text:

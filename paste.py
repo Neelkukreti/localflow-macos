@@ -108,6 +108,6 @@ def insert(text: str, cfg: dict, press_enter: bool = False):
             time.sleep(0.15)
             _press_return()
         if prev is not None:
-            # Give the paste a beat to consume the clipboard before restoring — on a timer, so the dictation finishes
-            # now rather than 0.4 s later. A next dictation can't paste inside 0.4 s (transcription alone takes longer).
+            # Give the paste a beat to consume the clipboard before restoring — on a timer, so the dictation is done
+            # now rather than 0.4 s later (28 Sep 2026). A next dictation can't paste inside 0.4 s (Whisper alone is 0.6 s+).
             threading.Timer(0.4, _write_clipboard, (prev,)).start()

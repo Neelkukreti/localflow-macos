@@ -160,7 +160,9 @@ try:
     w._hold_key_physically_down = lambda: False   # the key is up; the event was lost
     w.hold.down()                                  # press seen...
     w._watch_hold_key()                            # ...release never delivered
-    _time.sleep(0.6)
+    _deadline = _time.time() + 5                   # poll, don't guess: slow under load
+    while w.is_recording and _time.time() < _deadline:
+        _time.sleep(0.05)
     check("watchdog ends a hold whose release was lost", (w.is_recording, len(w.finished)), (False, 1))
     w2 = _W(); w2.is_recording = False; w2._key_watch = None; w2.finished = []
     w2.hold = HoldGrammar(lambda: setattr(w2, "is_recording", True),
