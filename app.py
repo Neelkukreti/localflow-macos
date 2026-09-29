@@ -44,6 +44,8 @@ from scratchpad import Scratchpad
 from hub import Hub
 from remote import Remote
 from hold_grammar import HoldGrammar
+from worker_client import WorkerClient, WorkerTimeout, WorkerFailed
+import recordings
 from flowbar import FlowBar
 from fn_key import FnListener
 
@@ -112,6 +114,8 @@ DEFAULT_SHORTCUTS = {
     # A press-once toggle, for a Stream Deck key (or anything that can't hold a
     # key down). F18 because no Mac keyboard has one, so it collides with nothing.
     "toggle_dictation": "<f18>",
+    # Cancel whatever is recording or processing — the Mac's own "stop" chord.
+    "cancel": "<cmd>+<alt>+.",
 }
 
 
@@ -258,6 +262,9 @@ class LocalFlowApp(rumps.App):
             double_seconds=trig.get("double_tap_seconds", 0.35),
         )
         self._key_watch = None
+        self.worker = WorkerClient(self.cfg["whisper"])
+        self._busy_since = None
+        self._ticker = None
         self._watchdog = None
         self.last_text = ""
         self.history = History()
@@ -275,7 +282,7 @@ class LocalFlowApp(rumps.App):
         self._bar_save_timer = None
         self._bootstrap_dictionary()
 
-        self.status_item = rumps.MenuItem("Idle")
+        self.status_item = rumps.MenuItem("Idle", callback=self._status_clicked)
         self.last_item = rumps.MenuItem("Last: (nothing yet)", callback=self.copy_last)
         self.voice_item = rumps.MenuItem("Voice: —")
         self.mic_menu = rumps.MenuItem("Microphone")
@@ -283,6 +290,7 @@ class LocalFlowApp(rumps.App):
         self.snip_menu = rumps.MenuItem("Snippets")
         self.level_menu = rumps.MenuItem("Cleanup level")
         self.lang_menu = rumps.MenuItem("Language")
+        self.failed_menu = rumps.MenuItem("Failed dictations")
         self.menu = [
             self.status_item,
             self.voice_item,
@@ -290,6 +298,7 @@ class LocalFlowApp(rumps.App):
             self.last_item,
             rumps.MenuItem("Open LocalFlow…", callback=self.open_hub),
             rumps.MenuItem("Stop / reset", callback=self.force_idle),
+            self.failed_menu,
             rumps.MenuItem("Scratchpad", callback=self.toggle_scratchpad),
             None,
             self.mic_menu,
@@ -417,6 +426,7 @@ class LocalFlowApp(rumps.App):
             keys.get("command_mode"): self._hk_command_mode,
             keys.get("scratchpad"): lambda: self.toggle_scratchpad(None),
             keys.get("toggle_dictation"): self._hk_toggle_dictation,
+            keys.get("cancel"): lambda: self.force_idle(None),
         }
         binding = {k: v for k, v in binding.items() if k}
         if not binding:
@@ -608,7 +618,12 @@ class LocalFlowApp(rumps.App):
         result nobody reads, and its text is never pasted.
         """
         was_busy = self.busy or self.is_recording
+        was_processing = self.busy
         self._job += 1
+        if was_processing:
+            # Actually stop the work: kill the Whisper process (the only way to
+            # halt a wedged transcription) and bring a fresh one up behind it.
+            threading.Thread(target=self.worker.restart, daemon=True).start()
         self._clear_watchdog()
         self._clear_timers()
         self._stop_meter()
@@ -634,10 +649,143 @@ class LocalFlowApp(rumps.App):
         if was_busy:
             rumps.notification("LocalFlow", "Stopped", "Dropped the dictation in progress.")
 
+    def _status_clicked(self, _):
+        """The status line doubles as the cancel button while something runs."""
+        if self.busy or self.is_recording:
+            self.force_idle(None)
+
+    def _start_ticker(self, job):
+        """While processing, show elapsed seconds and that a click cancels."""
+        self._busy_since = time.time()
+
+        def tick():
+            while self.busy and self._job == job:
+                secs = int(time.time() - self._busy_since)
+                phase = getattr(self, "_phase", "Transcribing")
+                self.status_item.title = f"{phase}… {secs}s — click to cancel"
+                time.sleep(1.0)
+        self._ticker = threading.Thread(target=tick, daemon=True)
+        self._ticker.start()
+
+    def _transcribe_resilient(self, audio, whisper_cfg, prompt, app_name, job):
+        """Save the audio, transcribe it in the worker, and if the worker hangs
+        or dies: kill it, restart it and retry once. If that fails too, keep
+        the audio under Failed dictations and say so. Returns None on failure
+        or cancellation."""
+        path = recordings.save(audio, self.cfg["audio"]["samplerate"])
+        secs = len(audio) / float(self.cfg["audio"]["samplerate"])
+        base = max(20.0, secs * 4.0)          # turbo runs ~7x realtime; 4x is generous
+        attempts = [(prompt, base), ("", base * 1.5)]   # the retry drops the prompt
+        last_error = None
+        for i, (p, budget) in enumerate(attempts):
+            if job is not None and job != self._job:
+                recordings.fail(path, "cancelled", app=app_name)
+                self._build_failed_menu()
+                return None
+            self._phase = "Transcribing" if i == 0 else "Retrying"
+            try:
+                text = self.worker.transcribe(path, whisper_cfg, p, timeout=budget)
+                recordings.done(path)
+                return text
+            except (WorkerTimeout, WorkerFailed) as e:
+                last_error = e
+                if job is not None and job != self._job:
+                    recordings.fail(path, "cancelled", app=app_name)
+                    self._build_failed_menu()
+                    return None
+                if i == 0:
+                    rumps.notification("LocalFlow", "Transcription stalled — retrying",
+                                       "Restarted the transcriber; trying your audio again.")
+                    self.worker.restart()
+        recordings.fail(path, last_error, app=app_name)
+        self._build_failed_menu()
+        rumps.notification("LocalFlow", "Couldn't transcribe that",
+                           "Your audio is saved. Menu → Failed dictations → Retry.")
+        return None
+
+    # ---------- failed dictations ----------
+
+    def _build_failed_menu(self):
+        def build():
+            items = recordings.listing()
+            if self.failed_menu._menu is not None:
+                self.failed_menu.clear()
+            self.failed_menu.title = f"Failed dictations ({len(items)})" if items else "Failed dictations"
+            if not items:
+                self.failed_menu.add(rumps.MenuItem("(none — nothing lost)"))
+                return
+            for e in items[:15]:
+                when = time.strftime("%d %b %H:%M", time.localtime(e["when"]))
+                why = "cancelled" if e["reason"] == "cancelled" else "failed"
+                item = rumps.MenuItem(f"Retry {when} · {e['seconds']:.0f}s · {why}",
+                                      callback=self._retry_failed)
+                item.rec_path = e["path"]
+                self.failed_menu.add(item)
+            self.failed_menu.add(None)
+            self.failed_menu.add(rumps.MenuItem("Show in Finder", callback=lambda _: subprocess.Popen(
+                ["open", recordings.FAILED])))
+            self.failed_menu.add(rumps.MenuItem("Delete all", callback=self._clear_failed))
+        mainthread.on_main(build)
+
+    def _clear_failed(self, _):
+        for e in recordings.listing():
+            recordings.discard(e["path"])
+        self._build_failed_menu()
+
+    def _retry_failed(self, sender):
+        """Re-run a saved dictation. The app you were in has probably moved on,
+        so the result goes to the clipboard (and Last), not into whatever has
+        focus now."""
+        path = getattr(sender, "rec_path", None)
+        if not path or self.busy or self.is_recording:
+            return
+        self.busy = True
+        self._job += 1
+        job = self._job
+        self._set_state(WORKING)
+        self._start_ticker(job)
+
+        def run():
+            try:
+                import wave as _wave
+                with _wave.open(path) as w:
+                    audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768
+                language, _seed, romanize = languages.resolve(self.cfg["whisper"])
+                whisper_cfg = {**self.cfg["whisper"], "language": language}
+                self._phase = "Retrying"
+                try:
+                    text = self.worker.transcribe(path, whisper_cfg, "",
+                                                  timeout=max(30.0, len(audio) / 16000.0 * 6))
+                except (WorkerTimeout, WorkerFailed) as e:
+                    rumps.notification("LocalFlow", "Retry failed", f"Still couldn't transcribe it ({e}). It's still saved.")
+                    return
+                if job != self._job:
+                    return
+                if romanize:
+                    text = languages.romanise(text)
+                final = cleanup.clean(text, self.cfg["cleanup"]) or text
+                final = self.snippets.expand(self.dictionary.apply_casing(self.dictionary.apply_fixes(final)))
+                if not final.strip():
+                    rumps.notification("LocalFlow", "Nothing in that recording", "It transcribed as silence.")
+                    recordings.discard(path)
+                    return
+                subprocess.run(["pbcopy"], input=final, text=True, env=UTF8_ENV)
+                self.last_text = final
+                self.last_item.title = f"Last: {final[:40]}"
+                recordings.discard(path)
+                rumps.notification("LocalFlow", "Recovered — copied to clipboard", final[:120])
+            finally:
+                if job == self._job:
+                    self.busy = False
+                    self._set_state(IDLE)
+                    self.status_item.title = "Idle"
+                self._build_failed_menu()
+        threading.Thread(target=run, daemon=True).start()
+
     def _arm_watchdog(self, job):
         """If transcription wedges, don't leave the app stuck on ⏳ forever."""
         self._clear_watchdog()
-        limit = self.cfg.get("transcribe_timeout", 90)
+        limit = self.cfg.get("transcribe_timeout", 180)
         if not limit:
             return
 
@@ -757,6 +905,8 @@ class LocalFlowApp(rumps.App):
         self._job += 1
         job = self._job
         self._arm_watchdog(job)
+        self._phase = "Transcribing"
+        self._start_ticker(job)
         threading.Thread(target=self._process, args=(audio, mode, job), daemon=True).start()
 
     def _prompt_for(self, app_name, seed):
@@ -793,8 +943,8 @@ class LocalFlowApp(rumps.App):
             app_name = frontmost_app()
             prompt = self._prompt_for(app_name, seed)
             whisper_cfg = {**self.cfg["whisper"], "language": language}
-            raw = transcribe.transcribe(audio, whisper_cfg, prompt=prompt)
-            if not raw.strip():
+            raw = self._transcribe_resilient(audio, whisper_cfg, prompt, app_name, job)
+            if raw is None or not raw.strip():
                 return
             if raw.strip().lower().strip(".!") in WHISPER_SILENCE_PHRASES and rms(audio) < 0.01:
                 return  # a quiet clip Whisper filled with a stock phrase
@@ -811,7 +961,7 @@ class LocalFlowApp(rumps.App):
             self.voice_item.title = f"Voice: {voice_name} ({app_name or 'unknown app'})"
             if job is not None and job != self._job:
                 return  # stopped while Whisper ran
-            self.status_item.title = "Cleaning up…"
+            self._phase = "Cleaning up"
             final = cleanup.clean(raw, self.cfg["cleanup"],
                                   level=voice.get("level"), style=voice.get("style"))
             if not final.strip():
@@ -1289,7 +1439,8 @@ class LocalFlowApp(rumps.App):
         missing = chosen if chosen and chosen not in names else None
         labels = {"paste_last": "Paste last dictation", "copy_last": "Copy last dictation",
                   "command_mode": "Command Mode", "scratchpad": "Scratchpad",
-                  "toggle_dictation": "Start / stop dictation (Stream Deck)"}
+                  "toggle_dictation": "Start / stop dictation (Stream Deck)",
+                  "cancel": "Cancel recording or processing"}
         keys = {**DEFAULT_SHORTCUTS, **(self.cfg.get("shortcuts") or {})}
         pretty = {"<cmd>": "⌘", "<alt>": "⌥", "<ctrl>": "⌃", "<shift>": "⇧", "+": ""}
         out = []
@@ -1428,13 +1579,16 @@ class LocalFlowApp(rumps.App):
         costs no extra memory in the long run and takes ~5s off the first thing
         you say after launching.
         """
+        recovered = recordings.clear_pending()
+        self._build_failed_menu()
+        if recovered:
+            rumps.notification("LocalFlow", "Recovered an interrupted dictation",
+                               "It's saved under Failed dictations in the menu — retry it from there.")
         if not self.cfg["whisper"].get("preload", True):
             return
-
-        def load():
-            if transcribe.preload(self.cfg["whisper"]):
-                self.status_item.title = "Idle"
-        threading.Thread(target=load, daemon=True).start()
+        # Whisper runs in its own process (whisper_worker.py) so a hang can be
+        # killed; starting it now loads the model before the first dictation.
+        self.worker.start()
 
     def _warn_if_ollama_down(self):
         """Start Ollama if it isn't up. run.sh used to do this, but launching from
@@ -1463,6 +1617,7 @@ class LocalFlowApp(rumps.App):
         threading.Thread(target=boot, daemon=True).start()
 
     def quit_app(self, _):
+        self.worker.kill()
         self._clear_timers()
         self._clear_watchdog()
         self.scratchpad.close()

@@ -173,7 +173,12 @@ Things that keep it light:
   from ~430 ms of AppleScript to ~2 ms).
 - **Whisper preloads** in the background at launch, so the first dictation isn't the slow one.
 - **The window frees its web view** when you close it.
-- A **watchdog** abandons a transcription that runs past `transcribe_timeout` (90 s).
+- **Whisper runs in its own process** (`whisper_worker.py`), so a hung transcription can actually be
+  killed. Every dictation's audio is **saved first**; if Whisper doesn't answer in time (4× the clip
+  length, at least 20 s) the worker is killed, restarted and the audio **retried once**. If that fails
+  too you're told, and the audio waits under **Failed dictations → Retry** (kept a week). Cancel any
+  time: click the status line ("Transcribing… 12s — click to cancel"), press **⌘⌥.**, or
+  `notifyutil -p com.localflow.stop`.
 
 To go lighter still, set `whisper.model` to a smaller MLX Whisper, `cleanup.enabled` to `false`,
 or a shorter `cleanup.keep_alive` so Ollama releases its model sooner (it reloads in ~3 s, and LocalFlow starts that reload the moment you start
